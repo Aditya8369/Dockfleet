@@ -1,5 +1,7 @@
 # DockFleet – Self‑Healing Local Container Orchestrator
 
+![FOSS Hack 2026 Winner](https://img.shields.io/badge/FOSS%20Hack%202026-Winner-success)
+
 **Run, monitor, and automatically heal multi‑service Docker stacks using a single YAML file – no cloud, no Kubernetes, no external APIs.**
 
 ---
