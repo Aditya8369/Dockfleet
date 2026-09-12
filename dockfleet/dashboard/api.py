@@ -66,9 +66,13 @@ def on_startup() -> None:
         print("Orchestrator failed:", exc)
 
     try:
-        _health_scheduler = HealthScheduler(config)
+        project_dir = config_path.resolve().parent
+        _health_scheduler = HealthScheduler(config, project_dir=project_dir)
         _health_scheduler.start()
         print("HealthScheduler started")
+    except RuntimeError as exc:
+        # Lock conflict: another scheduler is already running for this project.
+        print(f"HealthScheduler skipped: {exc}")
     except Exception as exc:
         print("Scheduler failed:", exc)
 

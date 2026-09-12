@@ -120,7 +120,9 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
         bootstrap_from_path(str(path))
 
         # Start health scheduler in background (self-healing)
-        scheduler = HealthScheduler(config)
+        # Lock scope: the directory containing the config file (project root).
+        project_dir = path.resolve().parent
+        scheduler = HealthScheduler(config, project_dir=project_dir)
         scheduler.start()
         typer.echo(
             f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
@@ -327,7 +329,10 @@ def health_dev(
             typer.echo("No services with healthcheck defined in config.")
             raise typer.Exit(code=1)
 
-        scheduler = HealthScheduler(config)
+        # For --once mode, skip locking (single pass, no long-running scheduler).
+        # For long-running mode, lock to prevent duplicate schedulers.
+        project_dir = path.resolve().parent if not once else None
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         if once:
             scheduler._logger = logging.getLogger(__name__)
@@ -383,7 +388,8 @@ def self_heal(
         typer.echo(f"Bootstrapping health DB from {path} ...")
         bootstrap_from_path(str(path))
 
-        scheduler = HealthScheduler(config)
+        project_dir = path.resolve().parent
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         typer.echo("Self-healing active. Press Ctrl+C to stop.\n")
 

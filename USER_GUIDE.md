@@ -279,6 +279,27 @@ Fix:
 
 ---
 
+### Health scheduler already running
+
+```
+Health scheduler is already running for this project (PID 12345 on myhost).
+```
+
+This means another DockFleet process (CLI or dashboard) is already managing
+health checks for this project. Only one health scheduler can be active per
+project at a time.
+
+Fix:
+
+- Stop the other scheduler first (Ctrl+C if it's a CLI process, or stop the
+  dashboard server).
+- If the other process crashed without cleaning up, DockFleet will
+  automatically recover the stale lock on the next `dockfleet up`.
+- As a last resort, delete the `.scheduler.lock` file in your project root
+  and retry.
+
+---
+
 ## 8. Quick Workflow
 
 ```

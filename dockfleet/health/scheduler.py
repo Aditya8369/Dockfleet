@@ -1,11 +1,13 @@
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 from sqlmodel import Session, select
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
 from dockfleet.health.checker import HealthChecker
 from dockfleet.health.models import Service, engine
+from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.status import (
     update_service_health,
     needs_restart,
@@ -33,6 +35,7 @@ class HealthScheduler:
         config: DockFleetConfig,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
         checker: HealthChecker | None = None,
+        project_dir: Path | str | None = None,
     ) -> None:
         self.config = config
         self.interval_seconds = interval_seconds
@@ -43,10 +46,39 @@ class HealthScheduler:
         # allow injecting a fake checker in tests, default to real one.
         self._checker: HealthChecker = checker or HealthChecker()
 
+        # Cross-process lock to prevent duplicate schedulers for the same
+        # project.  ``project_dir`` defaults to the directory containing the
+        # SQLite database (i.e. the project root).  Pass ``None`` explicitly
+        # to disable locking (e.g. in tests that manage the scheduler
+        # manually).
+        if project_dir is not None:
+            self._lock: Optional[SchedulerLock] = SchedulerLock(
+                Path(project_dir)
+            )
+        else:
+            self._lock = None
+
     def start(self) -> None:
-        # Start the background polling thread if it's not already running.
+        """
+        Start the background polling thread.
+
+        If a ``project_dir`` was provided at construction time, an
+        exclusive cross-process lock is acquired first.  If another
+        scheduler is already running for the same project a
+        :class:`RuntimeError` is raised with an actionable message.
+
+        Raises
+        ------
+        RuntimeError
+            If the cross-process scheduler lock cannot be acquired (another
+            instance is already running for this project).
+        """
         if self._thread is not None and self._thread.is_alive():
             return
+
+        # Acquire cross-process lock (may raise RuntimeError).
+        if self._lock is not None:
+            self._lock.acquire()
 
         self._stopped = False
 
@@ -59,7 +91,10 @@ class HealthScheduler:
         self._logger.info("HealthScheduler: started background thread")
 
     def stop(self) -> None:
-        # Signal the polling thread to stop and wait for it to finish.
+        """
+        Signal the polling thread to stop, wait for it to finish, and
+        release the cross-process scheduler lock.
+        """
         self._stopped = True
 
         if self._thread is not None and self._thread.is_alive():
@@ -70,6 +105,10 @@ class HealthScheduler:
 
         # Reset thread handle so a fresh start() can create a new one
         self._thread = None
+
+        # Release the cross-process lock so another scheduler can start.
+        if self._lock is not None and self._lock.is_held:
+            self._lock.release()
 
     def _poll(self) -> None:
         """
