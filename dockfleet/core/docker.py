@@ -1,5 +1,6 @@
 import subprocess
 
+
 class DockerManager:
     def create_network(self, name: str):
         try:
@@ -7,12 +8,19 @@ class DockerManager:
                 ["docker", "network", "create", name],
                 check=True,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.PIPE,
+                text=True,
             )
-        except subprocess.CalledProcessError:
-            # network probably already exists
-            pass
-
+        except subprocess.CalledProcessError as exc:
+            # Docker reports an existing network as a command failure even
+            # though this operation is intentionally idempotent. Suppress only
+            # that expected case; daemon, permission, validation, and other
+            # failures must propagate so startup does not continue on a network
+            # that was never created.
+            stderr = exc.stderr or ""
+            if "already exists" in stderr.lower():
+                return
+            raise
 
     def run_container(self, image, name, flags=None, network=None):
 
@@ -27,7 +35,6 @@ class DockerManager:
         cmd.append(image)
 
         subprocess.run(cmd, check=True)
-
 
     def remove_container(self, name):
 
@@ -48,7 +55,6 @@ class DockerManager:
             ["docker", "stop", name],
             check=True
         )
-
 
     def list_containers(self):
         subprocess.run(
