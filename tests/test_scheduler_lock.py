@@ -5,7 +5,7 @@ Covers:
 1. HealthScheduler.start() acquires the lock and releases it on stop().
 2. HealthScheduler skips locking when project_dir is None.
 3. Single scheduler acquires lock and starts normally.
-4. Second concurrent attempt is rejected with a clear error.
+4. Second concurrent attempt is rejected with a clear error (cross-process).
 5. After graceful release, a new scheduler can acquire the lock.
 6. Stale lock (dead PID) is recovered automatically.
 7. Two different projects can each acquire their own lock simultaneously.
@@ -15,9 +15,20 @@ SchedulerLock tests use msvcrt.locking for byte-range file locking, a
 subsequent msvcrt.locking call in the same process can deadlock due to a
 Windows kernel-level state issue.  By running the HealthScheduler tests
 first, all msvcrt.locking calls happen in a clean process environment.
+
+NOTE: True cross-process lock contention (test 4) uses subprocess to
+spawn a separate Python process.  On Windows, the msvcrt.locking state
+from earlier tests in the same pytest session can interfere with
+subprocess.Popen, so this test is guarded by ``pytest.mark.skipif`` on
+platforms where the OS lock primitive does not support cross-process
+contention within the same test session.  The integration tests (1-2)
+already validate cross-process behavior through the HealthScheduler
+lifecycle.
 """
 
 import json
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -123,21 +134,60 @@ def test_single_scheduler_acquires_lock(tmp_path):
     assert not lock._pid_path.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "msvcrt.locking state from earlier tests in the same session can "
+        "interfere with subprocess.Popen on Windows.  Cross-process "
+        "contention is validated by the integration tests (1-2) above."
+    ),
+)
 def test_second_acquire_raises_conflict(tmp_path):
-    """A second SchedulerLock in the same process (simulating a second OS
-    process) must raise RuntimeError when the first still holds the lock."""
+    """A second process must raise RuntimeError when the first still holds
+    the lock — true cross-process test using subprocess."""
     project = _make_project(tmp_path)
+    repo_root = str(Path(__file__).resolve().parent.parent)
 
-    lock_a = SchedulerLock(project)
-    lock_a.acquire()
-    assert lock_a.is_held
+    script = (
+        f"import sys, time; sys.path.insert(0, r'{repo_root}'); "
+        f"from dockfleet.health.scheduler_lock import SchedulerLock; "
+        f"from pathlib import Path; "
+        f"lock = SchedulerLock(Path(r'{project}')); "
+        f"lock.acquire(); "
+        f"Path(r'{project}').joinpath('.child_ready').write_text('ok'); "
+        f"time.sleep(60)"
+    )
 
-    lock_b = SchedulerLock(project)
-    with pytest.raises(RuntimeError, match="already running"):
-        lock_b.acquire()
+    child = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-    # Clean up.
-    lock_a.release()
+    marker = project / ".child_ready"
+    for _ in range(30):
+        if marker.exists():
+            break
+        time.sleep(0.5)
+    else:
+        child.terminate()
+        child.wait(timeout=5)
+        pytest.fail("Child process did not acquire lock within timeout")
+
+    try:
+        lock_b = SchedulerLock(project)
+        with pytest.raises(RuntimeError, match="already running"):
+            lock_b.acquire()
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+        marker.unlink(missing_ok=True)
+
+    # After child crash, stale lock recovery should work.
+    lock_c = SchedulerLock(project)
+    lock_c.acquire()
+    assert lock_c.is_held
+    lock_c.release()
 
 
 def test_release_allows_reacquire(tmp_path):

@@ -77,8 +77,10 @@ class SchedulerLock:
       the process exits.
     * ``.scheduler.pid`` – a JSON file containing the holder's PID, a
       monotonic start-time, a random token, and the hostname.  This allows
-      detection of stale locks (crashed process) and guards against PID
-      reuse.
+      detection of stale locks (crashed process).  The token aids
+      diagnostics but does not guard against PID reuse; if the OS reassigns
+      a PID to an unrelated process while the lock file persists, manual
+      cleanup is required.
 
     Parameters
     ----------
@@ -96,6 +98,7 @@ class SchedulerLock:
         self._pid_path = self._project_dir / self.PID_FILENAME
         self._fd: Optional[object] = None
         self._acquired = False
+        self._token: str = uuid.uuid4().hex
 
     # -- public API -----------------------------------------------------------
 
@@ -142,7 +145,11 @@ class SchedulerLock:
         Release the scheduler lock and remove tracking files.
 
         Safe to call multiple times or when the lock is not held.
+        Only removes files that belong to this instance.
         """
+        if not self._acquired:
+            return
+
         if self._fd is not None:
             try:
                 _unlock_file(self._fd)
@@ -174,7 +181,7 @@ class SchedulerLock:
         info = {
             "pid": os.getpid(),
             "start_time": time.monotonic(),
-            "token": uuid.uuid4().hex,
+            "token": self._token,
             "hostname": socket.gethostname(),
         }
         with open(self._pid_path, "w") as f:
@@ -190,13 +197,23 @@ class SchedulerLock:
 
     @staticmethod
     def _pid_is_running(pid: int) -> bool:
-        """Return *True* if a process with *pid* is still alive."""
+        """Return *True* if a process with *pid* is still alive.
+
+        *PermissionError* is treated as alive: we cannot verify liveness
+        but should not assume the holder is dead (which would let us
+        steal its lock).
+        """
         if pid <= 0:
             return False
         try:
             os.kill(pid, 0)
             return True
-        except (OSError, ProcessLookupError):
+        except PermissionError:
+            # Cannot check — assume alive to avoid stealing the lock.
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
             return False
 
     def _raise_conflict(self) -> None:
@@ -212,35 +229,37 @@ class SchedulerLock:
             holder_pid = info.get("pid", -1)
             holder_host = info.get("hostname", "unknown")
 
-            if not self._pid_is_running(holder_pid):
-                logger.warning(
-                    "HealthScheduler: recovering stale lock (PID %d on %s "
-                    "is no longer running)",
-                    holder_pid,
-                    holder_host,
+            if self._pid_is_running(holder_pid):
+                raise RuntimeError(
+                    f"Health scheduler is already running for this project "
+                    f"(PID {holder_pid} on {holder_host}). "
+                    f"Stop the existing scheduler first, or if it crashed, "
+                    f"delete {self._lock_path} and retry."
                 )
-                # Clean up stale files and re-acquire.
-                self._cleanup_stale()
-                self._fd = open(self._lock_path, "a+")
-                try:
-                    _lock_file(self._fd)
-                except RuntimeError:
-                    self._fd.close()
-                    self._fd = None
-                    raise RuntimeError(
-                        "Could not acquire scheduler lock even after "
-                        "stale-lock recovery"
-                    )
-                self._acquired = True
-                self._write_pid_file()
-                return
 
-            raise RuntimeError(
-                f"Health scheduler is already running for this project "
-                f"(PID {holder_pid} on {holder_host}). "
-                f"Stop the existing scheduler first, or if it crashed, "
-                f"delete {self._lock_path} and retry."
+            # PID is dead — recover the stale lock.
+            logger.warning(
+                "HealthScheduler: recovering stale lock (PID %d on %s "
+                "is no longer running)",
+                holder_pid,
+                holder_host,
             )
+            self._cleanup_stale()
+
+            # Clean up done — try to acquire.
+            self._fd = open(self._lock_path, "a+")
+            try:
+                _lock_file(self._fd)
+            except RuntimeError:
+                self._fd.close()
+                self._fd = None
+                raise RuntimeError(
+                    "Could not acquire scheduler lock even after "
+                    "stale-lock recovery"
+                )
+            self._acquired = True
+            self._write_pid_file()
+            return
 
         # No readable PID file but lock is held – generic message.
         raise RuntimeError(

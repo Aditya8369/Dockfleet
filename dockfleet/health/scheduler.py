@@ -47,10 +47,9 @@ class HealthScheduler:
         self._checker: HealthChecker = checker or HealthChecker()
 
         # Cross-process lock to prevent duplicate schedulers for the same
-        # project.  ``project_dir`` defaults to the directory containing the
-        # SQLite database (i.e. the project root).  Pass ``None`` explicitly
-        # to disable locking (e.g. in tests that manage the scheduler
-        # manually).
+        # project.  Callers must pass ``project_dir`` explicitly to enable
+        # locking; ``None`` disables it (e.g. in tests that manage the
+        # scheduler manually or in single-pass ``--once`` mode).
         if project_dir is not None:
             self._lock: Optional[SchedulerLock] = SchedulerLock(
                 Path(project_dir)
@@ -94,6 +93,10 @@ class HealthScheduler:
         """
         Signal the polling thread to stop, wait for it to finish, and
         release the cross-process scheduler lock.
+
+        The lock is released only after confirming the thread has exited
+        to prevent a new scheduler from starting while the old one is
+        still running.
         """
         self._stopped = True
 
@@ -101,12 +104,22 @@ class HealthScheduler:
             self._logger.info("HealthScheduler: stopping background thread")
             # Wait for the thread to finish its current loop
             self._thread.join(timeout=self.interval_seconds + 5)
+
+            if self._thread.is_alive():
+                # Thread still alive after join timeout — do NOT release the
+                # lock; doing so would let a new scheduler start while this
+                # one is still running, recreating the duplicate-work race.
+                self._logger.warning(
+                    "HealthScheduler: thread did not exit within timeout; "
+                    "keeping lock to avoid duplicate schedulers"
+                )
+                return
+
             self._logger.info("HealthScheduler: thread stopped")
 
-        # Reset thread handle so a fresh start() can create a new one
+        # Thread is gone (or was never started) — safe to release.
         self._thread = None
 
-        # Release the cross-process lock so another scheduler can start.
         if self._lock is not None and self._lock.is_held:
             self._lock.release()
 
