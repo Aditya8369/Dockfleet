@@ -204,27 +204,78 @@ def test_release_allows_reacquire(tmp_path):
     lock_b.release()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "msvcrt.locking state from earlier tests in the same session can "
+        "interfere with subprocess.Popen on Windows.  Stale-lock recovery "
+        "is validated by the integration tests (1-2) above."
+    ),
+)
 def test_stale_lock_recovery(tmp_path):
-    """A lock file whose PID is not running is treated as stale and
-    recovered automatically."""
+    """A lock held by a process whose PID file references a dead PID is
+    treated as stale and recovered automatically.
+
+    The subprocess acquires the real OS lock, then overwrites the PID file
+    with a certainly-dead PID (9999999).  When the parent tries to acquire,
+    ``_lock_file()`` fails (the child holds the OS lock), so
+    ``_raise_conflict()`` is entered.  It reads the PID file, finds a dead
+    PID, calls ``_cleanup_stale()``, and re-acquires successfully.
+    """
     project = _make_project(tmp_path)
+    repo_root = str(Path(__file__).resolve().parent.parent)
 
-    # Simulate a dead process: write a lock file and PID file manually,
-    # then verify a new SchedulerLock can recover from the stale state.
-    lock_path = project / SchedulerLock.LOCK_FILENAME
+    # Child: acquire lock, overwrite PID file with dead PID, hold lock.
+    script = (
+        f"import json, os, sys, time; "
+        f"sys.path.insert(0, r'{repo_root}'); "
+        f"from pathlib import Path; "
+        f"from dockfleet.health.scheduler_lock import SchedulerLock; "
+        f"p = Path(r'{project}'); "
+        f"lock = SchedulerLock(p); "
+        f"lock.acquire(); "
+        # Overwrite PID file with a certainly-dead PID so the parent's
+        # _raise_conflict() sees a stale holder.
+        f"with open(p / '.scheduler.pid', 'w') as f: "
+        f"  json.dump({{'pid': 9999999, 'start_time': 0, "
+        f"  'token': 'stale', 'hostname': 'dead-host'}}, f); "
+        f"Path(r'{project}').joinpath('.child_ready').write_text('ok'); "
+        f"time.sleep(60)"
+    )
 
-    # Write a lock file (simulates a crashed process that left it behind).
-    lock_path.write_text("")
+    child = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-    # Write a PID file referencing a process that is certainly not running.
-    _write_stale_pid(SchedulerLock(project), pid=9999999)
+    # Wait for child to acquire the lock and write the marker.
+    marker = project / ".child_ready"
+    for _ in range(30):
+        if marker.exists():
+            break
+        time.sleep(0.5)
+    else:
+        child.terminate()
+        child.wait(timeout=5)
+        pytest.fail("Child process did not acquire lock within timeout")
 
-    # A new lock should detect the stale PID and recover.
-    lock = SchedulerLock(project)
-    lock.acquire()
-    assert lock.is_held
+    # Verify the child wrote a dead PID to the PID file.
+    pid_info = json.loads((project / ".scheduler.pid").read_text())
+    assert pid_info["pid"] == 9999999
 
-    lock.release()
+    try:
+        # Parent tries to acquire — the OS lock is held by the child, so
+        # _lock_file() fails, _raise_conflict() reads the PID file, finds
+        # PID 9999999 (dead), calls _cleanup_stale(), and re-acquires.
+        lock = SchedulerLock(project)
+        lock.acquire()
+        assert lock.is_held
+        lock.release()
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+        marker.unlink(missing_ok=True)
 
 
 def test_different_projects_independent(tmp_path):

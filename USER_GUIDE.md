@@ -295,8 +295,6 @@ Fix:
   dashboard server).
 - If the other process crashed without cleaning up, DockFleet will
   automatically recover the stale lock on the next `dockfleet up`.
-- As a last resort, delete the `.scheduler.lock` file in your project root
-  and retry.
 
 ---
 
