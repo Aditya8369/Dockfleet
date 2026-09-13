@@ -295,3 +295,77 @@ def test_get_orchestrator_defaults(mock_orch_class):
 
     mock_orch_class.assert_called_once_with({}, self_healing=True)
     assert orch is mock_orch_class.return_value
+
+
+@patch("dockfleet.core.orchestrator.Orchestrator")
+def test_no_spurious_warning_when_self_healing_omitted(mock_orch_class, caplog):
+    """Regression: restart_service()/mark_restart_failed()/settings call
+    get_orchestrator() without self_healing.  When the singleton was created
+    with self_healing=False (e.g. --no-restart mode), these calls must NOT
+    trigger a spurious self_healing mismatch warning.
+    """
+    config = DockFleetConfig(
+        services={
+            "svc": ServiceConfig(
+                image="nginx", restart=RestartPolicy.always
+            )
+        }
+    )
+
+    # Create singleton with self_healing=False
+    get_orchestrator(config=config, self_healing=False)
+
+    # Simulate restart_service() / mark_restart_failed() / /settings pattern:
+    # call get_orchestrator() with no self_healing argument at all.
+    with caplog.at_level("WARNING", logger="dockfleet.core.orchestrator"):
+        get_orchestrator()
+
+    assert "self_healing" not in caplog.text
+    assert "arguments ignored" not in caplog.text
+
+
+@patch("dockfleet.core.orchestrator.Orchestrator")
+def test_no_warning_when_explicit_self_healing_matches(mock_orch_class, caplog):
+    """Explicitly passing the same self_healing value must not warn."""
+    config = DockFleetConfig(
+        services={
+            "svc": ServiceConfig(
+                image="nginx", restart=RestartPolicy.always
+            )
+        }
+    )
+
+    # Set mock instance attributes so _warn_on_mismatch comparison works
+    mock_instance = mock_orch_class.return_value
+    mock_instance.config = config
+    mock_instance.self_healing = False
+
+    get_orchestrator(config=config, self_healing=False)
+    with caplog.at_level("WARNING", logger="dockfleet.core.orchestrator"):
+        get_orchestrator(config=config, self_healing=False)
+
+    assert "arguments ignored" not in caplog.text
+
+
+@patch("dockfleet.core.orchestrator.Orchestrator")
+def test_warning_when_explicit_self_healing_differs(mock_orch_class, caplog):
+    """Explicitly passing a different self_healing must warn."""
+    config = DockFleetConfig(
+        services={
+            "svc": ServiceConfig(
+                image="nginx", restart=RestartPolicy.always
+            )
+        }
+    )
+
+    # Set mock instance attributes so _warn_on_mismatch comparison works
+    mock_instance = mock_orch_class.return_value
+    mock_instance.config = config
+    mock_instance.self_healing = False
+
+    get_orchestrator(config=config, self_healing=False)
+    with caplog.at_level("WARNING", logger="dockfleet.core.orchestrator"):
+        get_orchestrator(config=config, self_healing=True)
+
+    assert "self_healing" in caplog.text
+    assert "arguments ignored" in caplog.text

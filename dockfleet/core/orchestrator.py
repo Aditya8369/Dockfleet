@@ -28,6 +28,8 @@ from dockfleet.health.logs import store_log_line
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 
 class ServiceStat(BaseModel):
     service_name: str
@@ -54,12 +56,17 @@ def get_service_stats(config=None):
     return orch.get_service_stats()
 
 
-def get_orchestrator(config=None, self_healing: bool = True):
+def get_orchestrator(config=None, self_healing=_UNSET):
     """Return the module-level Orchestrator singleton, creating it on first call.
 
     The singleton is created once and reused for the lifetime of the process.
     If a subsequent call passes a *different* ``config`` or ``self_healing``
     value, a warning is logged and the original instance is returned unchanged.
+
+    ``self_healing`` uses a sentinel default so that callers which omit the
+    argument (e.g. ``restart_service()``, ``/settings``) do not spuriously
+    trigger a mismatch warning when the singleton was created with
+    ``self_healing=False``.
 
     Thread-safe: creation is guarded by a lock so concurrent first calls
     from different threads (e.g. a request handler and the health-scheduler
@@ -69,6 +76,9 @@ def get_orchestrator(config=None, self_healing: bool = True):
     for tests and deliberate full-reconfiguration flows, not production code).
     """
     global _orchestrator_instance
+
+    # Resolve sentinel to the real default before any comparison or creation.
+    resolved_self_healing = True if self_healing is _UNSET else self_healing
 
     if _orchestrator_instance is not None:
         _warn_on_mismatch(_orchestrator_instance, config, self_healing)
@@ -82,18 +92,24 @@ def get_orchestrator(config=None, self_healing: bool = True):
             return _orchestrator_instance
 
         _orchestrator_instance = Orchestrator(
-            config or {}, self_healing=self_healing
+            config or {}, self_healing=resolved_self_healing
         )
         return _orchestrator_instance
 
 
 def _warn_on_mismatch(orch, config, self_healing):
-    """Log a warning if caller-supplied args differ from the live singleton."""
+    """Log a warning if caller-supplied args differ from the live singleton.
+
+    When ``self_healing`` is the sentinel ``_UNSET`` (caller didn't pass it),
+    the self_healing comparison is skipped entirely — only ``config`` changes
+    are reported.  This prevents spurious warnings for callers like
+    ``restart_service()`` and ``/settings`` that never pass ``self_healing``.
+    """
     changes = []
 
     if config is not None and config != orch.config:
         changes.append("config")
-    if self_healing != orch.self_healing:
+    if self_healing is not _UNSET and self_healing != orch.self_healing:
         changes.append("self_healing")
 
     if changes:
