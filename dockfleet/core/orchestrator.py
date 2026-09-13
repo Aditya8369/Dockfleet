@@ -1,6 +1,7 @@
 import logging
 import re
 import subprocess
+import threading
 from datetime import datetime
 from typing import Optional
 import time
@@ -39,6 +40,7 @@ class ServiceStat(BaseModel):
 
 
 _orchestrator_instance = None
+_orchestrator_lock = threading.Lock()
 
 
 def get_container_name(service_name: str) -> str:
@@ -53,11 +55,74 @@ def get_service_stats(config=None):
 
 
 def get_orchestrator(config=None, self_healing: bool = True):
-    """Get/create global Orchestrator instance."""
+    """Return the module-level Orchestrator singleton, creating it on first call.
+
+    The singleton is created once and reused for the lifetime of the process.
+    If a subsequent call passes a *different* ``config`` or ``self_healing``
+    value, a warning is logged and the original instance is returned unchanged.
+
+    Thread-safe: creation is guarded by a lock so concurrent first calls
+    from different threads (e.g. a request handler and the health-scheduler
+    background thread) never create two instances.
+
+    Use :func:`reset_orchestrator` to explicitly clear the singleton (intended
+    for tests and deliberate full-reconfiguration flows, not production code).
+    """
     global _orchestrator_instance
-    if _orchestrator_instance is None:
-        _orchestrator_instance = Orchestrator(config or {}, self_healing=self_healing)
-    return _orchestrator_instance
+
+    if _orchestrator_instance is not None:
+        _warn_on_mismatch(_orchestrator_instance, config, self_healing)
+        return _orchestrator_instance
+
+    with _orchestrator_lock:
+        # Double-check inside the lock in case another thread created it
+        # while we were waiting on the lock.
+        if _orchestrator_instance is not None:
+            _warn_on_mismatch(_orchestrator_instance, config, self_healing)
+            return _orchestrator_instance
+
+        _orchestrator_instance = Orchestrator(
+            config or {}, self_healing=self_healing
+        )
+        return _orchestrator_instance
+
+
+def _warn_on_mismatch(orch, config, self_healing):
+    """Log a warning if caller-supplied args differ from the live singleton."""
+    changes = []
+
+    if config is not None and config != orch.config:
+        changes.append("config")
+    if self_healing != orch.self_healing:
+        changes.append("self_healing")
+
+    if changes:
+        logger.warning(
+            "get_orchestrator() called with changed %s but orchestrator "
+            "singleton already exists — arguments ignored. Existing values: "
+            "self_healing=%s. Call reset_orchestrator() first if you need "
+            "a fresh instance.",
+            ", ".join(changes),
+            orch.self_healing,
+        )
+
+
+def reset_orchestrator():
+    """Clear the module-level Orchestrator singleton.
+
+    After this call, the next :func:`get_orchestrator` invocation will create
+    a brand-new instance with whatever arguments are passed.
+
+    Intended for test teardown and legitimate full-reconfiguration flows.
+    **Not** to be called automatically in production code paths — callers
+    should treat this as a deliberate, explicit action.
+
+    Safe to call even if no singleton has been created yet (no-op).
+    """
+    global _orchestrator_instance
+
+    with _orchestrator_lock:
+        _orchestrator_instance = None
 
 
 def restart_service(name: str, config=None) -> bool:
