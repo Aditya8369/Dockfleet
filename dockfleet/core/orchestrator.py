@@ -9,7 +9,7 @@ import time
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from dockfleet.cli.config import RestartPolicy
+from dockfleet.cli.config import DockFleetConfig, RestartPolicy
 from dockfleet.core.docker import DockerManager
 from dockfleet.core.docker_flags import (
     build_env_flags,
@@ -68,9 +68,9 @@ def get_orchestrator(config=None, self_healing=_UNSET):
     trigger a mismatch warning when the singleton was created with
     ``self_healing=False``.
 
-    Thread-safe: creation is guarded by a lock so concurrent first calls
-    from different threads (e.g. a request handler and the health-scheduler
-    background thread) never create two instances.
+    Thread-safe: the entire read-or-create operation is atomic under a single
+    lock, so concurrent calls (including concurrent ``reset_orchestrator()``)
+    never observe a stale or partially-created instance.
 
     Use :func:`reset_orchestrator` to explicitly clear the singleton (intended
     for tests and deliberate full-reconfiguration flows, not production code).
@@ -80,19 +80,16 @@ def get_orchestrator(config=None, self_healing=_UNSET):
     # Resolve sentinel to the real default before any comparison or creation.
     resolved_self_healing = True if self_healing is _UNSET else self_healing
 
-    if _orchestrator_instance is not None:
-        _warn_on_mismatch(_orchestrator_instance, config, self_healing)
-        return _orchestrator_instance
-
     with _orchestrator_lock:
-        # Double-check inside the lock in case another thread created it
-        # while we were waiting on the lock.
         if _orchestrator_instance is not None:
             _warn_on_mismatch(_orchestrator_instance, config, self_healing)
             return _orchestrator_instance
 
+        # Default to a proper DockFleetConfig (not a bare dict) so
+        # Orchestrator.__init__ can safely assign .services on it.
+        effective_config = config or DockFleetConfig(services={})
         _orchestrator_instance = Orchestrator(
-            config or {}, self_healing=resolved_self_healing
+            effective_config, self_healing=resolved_self_healing
         )
         return _orchestrator_instance
 
@@ -134,6 +131,9 @@ def reset_orchestrator():
     should treat this as a deliberate, explicit action.
 
     Safe to call even if no singleton has been created yet (no-op).
+
+    Thread-safe: holds ``_orchestrator_lock`` for the entire operation so
+    concurrent ``get_orchestrator()`` calls never observe a stale instance.
     """
     global _orchestrator_instance
 

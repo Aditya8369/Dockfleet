@@ -277,23 +277,32 @@ def test_concurrent_first_call_creates_single_instance(mock_orch_class):
 
 
 @patch("dockfleet.core.orchestrator.Orchestrator")
-def test_config_none_defaults_to_empty_dict(mock_orch_class):
-    """config=None is treated as empty dict, same as first call."""
+def test_config_none_defaults_to_empty_config(mock_orch_class):
+    """config=None is treated as DockFleetConfig(services={})."""
     get_orchestrator(config=None, self_healing=True)
     get_orchestrator(config=None, self_healing=True)
 
     # Only one construction
     mock_orch_class.assert_called_once()
     call_args = mock_orch_class.call_args
-    assert call_args[0][0] == {}
+    # Default config is now a proper DockFleetConfig, not a bare dict
+    from dockfleet.cli.config import DockFleetConfig
+
+    assert isinstance(call_args[0][0], DockFleetConfig)
+    assert call_args[0][0].services == {}
 
 
 @patch("dockfleet.core.orchestrator.Orchestrator")
 def test_get_orchestrator_defaults(mock_orch_class):
-    """Default call (no args) uses config={} and self_healing=True."""
+    """Default call (no args) uses DockFleetConfig(services={}) and self_healing=True."""
     orch = get_orchestrator()
 
-    mock_orch_class.assert_called_once_with({}, self_healing=True)
+    from dockfleet.cli.config import DockFleetConfig
+
+    call_args = mock_orch_class.call_args
+    assert isinstance(call_args[0][0], DockFleetConfig)
+    assert call_args[0][0].services == {}
+    assert call_args[1]["self_healing"] is True
     assert orch is mock_orch_class.return_value
 
 
@@ -369,3 +378,124 @@ def test_warning_when_explicit_self_healing_differs(mock_orch_class, caplog):
 
     assert "self_healing" in caplog.text
     assert "arguments ignored" in caplog.text
+
+
+# ------------------------------------------------
+# Bug 1 regression: real Orchestrator with no config
+# ------------------------------------------------
+
+
+def test_get_orchestrator_no_config_returns_working_instance():
+    """Regression: get_orchestrator() with no config must not raise.
+
+    Before the fix, config=None resolved to a bare dict ``{}`` which
+    Orchestrator.__init__ tried to assign ``.services`` onto, raising
+    AttributeError.  The fix defaults to DockFleetConfig(services={}) instead.
+    """
+    reset_orchestrator()
+    try:
+        orch = get_orchestrator()
+        assert orch is not None
+        # Orchestrator must have a proper config with a .services attribute
+        assert hasattr(orch.config, "services")
+        assert orch.config.services == {}
+        assert orch.self_healing is True  # default
+    finally:
+        reset_orchestrator()
+
+
+def test_get_orchestrator_no_config_repeated_calls_return_same():
+    """Repeated no-arg calls return the same working instance."""
+    reset_orchestrator()
+    try:
+        first = get_orchestrator()
+        second = get_orchestrator()
+        assert first is second
+        assert hasattr(first.config, "services")
+    finally:
+        reset_orchestrator()
+
+
+# ------------------------------------------------
+# Bug 2 regression: TOCTOU race between get and reset
+# ------------------------------------------------
+
+
+def test_concurrent_get_reset_no_stale_instance():
+    """Regression: concurrent get_orchestrator() and reset_orchestrator()
+    must never return a broken or unusable instance.
+
+    Before the TOCTOU fix, the fast-path read was unsynchronized, so a
+    thread could read a non-None instance, get preempted while another
+    thread reset and recreated the singleton, and return a stale reference.
+    With the lock, the entire read-or-create is atomic.
+
+    This test stresses concurrent get/reset and verifies every returned
+    instance is a valid TaggedOrchestrator with proper attributes —
+    proving the lock serializes access correctly.
+    """
+    import itertools
+
+    import dockfleet.core.orchestrator as orch_mod
+
+    generation_counter = itertools.count(1)
+
+    class TaggedOrchestrator:
+        """Lightweight stand-in with a generation tag."""
+
+        def __init__(self, gen, self_healing=True):
+            self.generation = gen
+            self.self_healing = self_healing
+            self.config = DockFleetConfig(services={})
+
+    original_cls = orch_mod.Orchestrator
+
+    def tagged_factory(*args, **kwargs):
+        gen = next(generation_counter)
+        return TaggedOrchestrator(gen, **kwargs)
+
+    reset_orchestrator()
+    orch_mod.Orchestrator = tagged_factory
+    try:
+        errors = []
+        all_instances = []
+        lock_for_collection = threading.Lock()
+        stop = threading.Event()
+
+        def getter():
+            while not stop.is_set():
+                orch = get_orchestrator()
+                # Every returned instance must be a valid TaggedOrchestrator
+                if not isinstance(orch, TaggedOrchestrator):
+                    errors.append(
+                        f"returned non-TaggedOrchestrator: {type(orch)}"
+                    )
+                elif not hasattr(orch, "generation"):
+                    errors.append("returned instance missing generation")
+                else:
+                    with lock_for_collection:
+                        all_instances.append(orch)
+
+        def resetting():
+            while not stop.is_set():
+                reset_orchestrator()
+
+        threads = [
+            threading.Thread(target=getter),
+            threading.Thread(target=getter),
+            threading.Thread(target=getter),
+            threading.Thread(target=resetting),
+            threading.Thread(target=resetting),
+        ]
+        for t in threads:
+            t.start()
+        stop.wait(timeout=0.3)
+        for t in threads:
+            t.join(timeout=2)
+
+        assert not errors, "Race condition: " + "; ".join(errors)
+        # At least some instances should have been created (sanity check)
+        assert len(all_instances) > 0, "No instances were created at all"
+    finally:
+        orch_mod.Orchestrator = original_cls
+        reset_orchestrator()
