@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
-from dockfleet.health.models import init_db, Service as DBService, engine
+from dockfleet.cli.config import load_config
+from dockfleet.core.orchestrator import get_orchestrator
 from dockfleet.dashboard.routes import router as dashboard_router
 from dockfleet.health.log_ingestor import ingest_docker_logs_once
-from dockfleet.cli.config import load_config
+from dockfleet.health.models import PROJECT_ROOT, engine, init_db
+from dockfleet.health.models import Service as DBService
 from dockfleet.health.scheduler import HealthScheduler
 from dockfleet.health.seed import bootstrap_from_path
-from dockfleet.core.orchestrator import get_orchestrator
-
 
 # ✅ Create app FIRST
 app = FastAPI()
@@ -66,9 +67,15 @@ def on_startup() -> None:
         print("Orchestrator failed:", exc)
 
     try:
-        _health_scheduler = HealthScheduler(config)
+        # Lock scope: PROJECT_ROOT (where dockfleet.db lives), not config dir.
+        # This ensures CLI and dashboard always use the same lock regardless of
+        # where the YAML config file is located.
+        _health_scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
         _health_scheduler.start()
         print("HealthScheduler started")
+    except RuntimeError as exc:
+        # Lock conflict: another scheduler is already running for this project.
+        print(f"HealthScheduler skipped: {exc}")
     except Exception as exc:
         print("Scheduler failed:", exc)
 
