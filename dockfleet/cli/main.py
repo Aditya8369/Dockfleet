@@ -10,9 +10,10 @@ from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
-from dockfleet.core.orchestrator import Orchestrator
-from dockfleet.health.logs import LogEvent  # make sure this exists
-from dockfleet.health.models import engine
+from dockfleet.core.orchestrator import Orchestrator, get_logs
+from dockfleet.health.logs import LogEvent
+from dockfleet.health.models import PROJECT_ROOT, engine
+
 from dockfleet.health.scheduler import HealthScheduler
 from dockfleet.health.seed import bootstrap_from_path
 from dockfleet.health.status import update_service_health
@@ -123,7 +124,10 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
         bootstrap_from_path(str(path))
 
         # Start health scheduler in background (self-healing)
-        scheduler = HealthScheduler(config)
+        # Lock scope: PROJECT_ROOT (where dockfleet.db lives), not the config dir.
+        # This ensures CLI and dashboard always use the same lock regardless of
+        # where the YAML config file is located.
+        scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
         scheduler.start()
         typer.echo(
             f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
@@ -344,7 +348,11 @@ def health_dev(
             typer.echo("No services with healthcheck defined in config.")
             raise typer.Exit(code=1)
 
-        scheduler = HealthScheduler(config)
+        # For --once mode, skip locking (single pass, no long-running scheduler).
+        # For long-running mode, lock to prevent duplicate schedulers.
+        # Lock scope: PROJECT_ROOT (where dockfleet.db lives).
+        project_dir = PROJECT_ROOT if not once else None
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         if once:
             scheduler._logger = logging.getLogger(__name__)
@@ -403,7 +411,8 @@ def self_heal(
         typer.echo(f"Bootstrapping health DB from {path} ...")
         bootstrap_from_path(str(path))
 
-        scheduler = HealthScheduler(config)
+        project_dir = PROJECT_ROOT
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         typer.echo("Self-healing active. Press Ctrl+C to stop.\n")
 

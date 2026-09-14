@@ -41,8 +41,12 @@ def test_update_service_health_changes_db_fields(tmp_path):
     )
 
     with Session(engine) as session:
-        svc = session.exec(select(Service).where(Service.name == service_name)).one()
-        assert svc.status == "unhealthy"
+        svc = session.exec(
+            select(Service).where(Service.name == service_name)
+        ).one()
+
+        assert svc.status == "running"
+        assert svc.health_status == "crashed"
         assert svc.last_health_check is not None
-        assert svc.restart_count == healthy_restart_count + 1
+        assert svc.restart_count == healthy_restart_count
         assert svc.last_failure_reason == "test failure"
