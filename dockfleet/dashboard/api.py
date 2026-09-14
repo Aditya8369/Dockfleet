@@ -119,4 +119,3 @@ def fetch_services() -> list[dict]:
             }
             for svc in services
         ]
-        

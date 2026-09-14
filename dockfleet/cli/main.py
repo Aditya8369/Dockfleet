@@ -11,8 +11,9 @@ from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
 from dockfleet.core.orchestrator import Orchestrator, get_logs
-from dockfleet.health.logs import LogEvent  # make sure this exists
+from dockfleet.health.logs import LogEvent
 from dockfleet.health.models import PROJECT_ROOT, engine
+
 from dockfleet.health.scheduler import HealthScheduler
 from dockfleet.health.seed import bootstrap_from_path
 from dockfleet.health.status import update_service_health
@@ -45,6 +46,7 @@ def setup_health_logging() -> None:
 # ------------------------------------------------
 # validate
 # ------------------------------------------------
+
 
 @validate_app.callback(invoke_without_command=True)
 def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -80,6 +82,7 @@ def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # seed
 # ------------------------------------------------
 
+
 @app.command()
 def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Initialize the service database and register services from the configuration."""
@@ -95,6 +98,7 @@ def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # up
 # ------------------------------------------------
+
 
 @app.command()
 def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -135,6 +139,8 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
         typer.echo("Services started.")
         typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error starting services: {e}")
         raise typer.Exit(code=1)
@@ -143,6 +149,7 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # down
 # ------------------------------------------------
+
 
 @app.command()
 def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -156,6 +163,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
         orch.down()
 
         typer.echo("\n✓ Services stopped")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
@@ -164,6 +173,7 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # ps
 # ------------------------------------------------
+
 
 @app.command()
 def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -174,6 +184,8 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
         config = load_config(path)
         orch = Orchestrator(config)
         orch.ps()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error listing containers: {e}")
         raise typer.Exit(code=1)
@@ -182,6 +194,7 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # logs (docker logs)
 # ------------------------------------------------
+
 
 @app.command()
 def logs(
@@ -207,6 +220,8 @@ def logs(
                 text=True,
             )
             typer.echo(result.stdout)
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo(f"Service '{service}' not found or container not running.")
         raise typer.Exit(code=1)
@@ -215,6 +230,7 @@ def logs(
 # ------------------------------------------------
 # show-logs (DB logs)
 # ------------------------------------------------
+
 
 @app.command("show-logs")
 def show_logs(
@@ -238,15 +254,15 @@ def show_logs(
                 return
 
             for log in logs:
-                ts = getattr(log, "timestamp", None) or getattr(
-                    log, "created_at", None
-                )
+                ts = getattr(log, "timestamp", None) or getattr(log, "created_at", None)
                 if ts:
                     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     ts_str = "no-time"
 
                 typer.echo(f"[{ts_str}] [{log.service_name}] {log.message}")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Failed to fetch logs: {e}")
         raise typer.Exit(code=1)
@@ -255,6 +271,7 @@ def show_logs(
 # ------------------------------------------------
 # doctor
 # ------------------------------------------------
+
 
 @app.command()
 def doctor():
@@ -275,6 +292,8 @@ def doctor():
         )
         typer.echo(f"Docker detected: {result.stdout.strip()}")
         typer.echo("✓ Environment looks good")
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo("✗ Docker not found or not running")
         raise typer.Exit(code=1)
@@ -283,6 +302,7 @@ def doctor():
 # ------------------------------------------------
 # health-dev (unchanged behavior, for dev)
 # ------------------------------------------------
+
 
 @app.command("health-dev")
 def health_dev(
@@ -321,9 +341,7 @@ def health_dev(
 
         # check if any service has healthcheck defined
         services_with_health = [
-            name
-            for name, svc in config.services.items()
-            if svc.healthcheck is not None
+            name for name, svc in config.services.items() if svc.healthcheck is not None
         ]
 
         if not services_with_health:
@@ -366,6 +384,8 @@ def health_dev(
         except KeyboardInterrupt:
             typer.echo("\nStopping health scheduler...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Health scheduler failed: {e}")
         raise typer.Exit(code=1)
@@ -374,6 +394,7 @@ def health_dev(
 # ------------------------------------------------
 # self-heal (unchanged; continuous health loop only)
 # ------------------------------------------------
+
 
 @app.command("self-heal")
 def self_heal(
@@ -403,6 +424,8 @@ def self_heal(
         except KeyboardInterrupt:
             typer.echo("\nStopping self-healing loop...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Self-heal command failed: {e}")
         raise typer.Exit(code=1)
@@ -411,6 +434,7 @@ def self_heal(
 # ------------------------------------------------
 # health-logs (NEW)
 # ------------------------------------------------
+
 
 @app.command("health-logs")
 def health_logs(

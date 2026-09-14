@@ -4,6 +4,7 @@ from pathlib import Path
 
 LOG_PATH = Path("dockfleet-health.log")
 
+
 def setup_health_logging() -> None:
     logging.basicConfig(
         level=logging.INFO,

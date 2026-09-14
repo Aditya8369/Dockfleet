@@ -1,6 +1,5 @@
 import subprocess
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -8,24 +7,24 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from dockfleet.dashboard.services import get_services
+from dockfleet.core.logs import get_logs_services, stream_container_logs
 from dockfleet.core.orchestrator import get_orchestrator
-from dockfleet.core.logs import stream_container_logs, get_logs_services
+from dockfleet.dashboard.services import get_services
+from dockfleet.health.logs import (
+    iter_logs_as_csv,
+    iter_logs_as_text,
+    query_logs,
+)
+from dockfleet.health.models import LogEvent, RestartEvent, engine
+from dockfleet.health.queries import (
+    get_failure_reasons_breakdown,
+    get_most_unstable_services,
+    get_restart_history,
+)
 from dockfleet.health.status import (
     record_manual_restart_event,
     record_manual_stop,
 )
-from dockfleet.health.logs import (
-    query_logs,
-    iter_logs_as_text,
-    iter_logs_as_csv,
-)
-from dockfleet.health.queries import (
-    get_most_unstable_services,
-    get_restart_history,
-    get_failure_reasons_breakdown,
-)
-from dockfleet.health.models import RestartEvent, engine, LogEvent
 
 router = APIRouter()
 templates = Jinja2Templates(directory="dockfleet/dashboard/templates")
@@ -33,7 +32,7 @@ templates = Jinja2Templates(directory="dockfleet/dashboard/templates")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def to_ist_iso(dt: Optional[datetime]) -> Optional[str]:
+def to_ist_iso(dt: datetime | None) -> str | None:
     """Convert naive UTC datetime to IST ISO string."""
     if dt is None:
         return None
@@ -65,7 +64,7 @@ class Service(BaseModel):
         ),
     )
     image: str = Field(..., description="Docker image used by this service")
-    ports: Optional[str] = Field(None, description="Port mappings, e.g. 8000:80")
+    ports: str | None = Field(None, description="Port mappings, e.g. 8000:80")
     restart_policy: str = Field(
         ..., description="Restart policy: always | on-failure | never"
     )
@@ -73,19 +72,19 @@ class Service(BaseModel):
         ..., description="Total number of times this service has been restarted"
     )
     # Serialized as IST ISO string
-    last_health_check: Optional[str] = Field(
+    last_health_check: str | None = Field(
         None, description="IST timestamp of the last health check (ISO string)"
     )
 
-    cpu: Optional[str] = Field(None, description="Current CPU usage percentage")
-    memory: Optional[str] = Field(None, description="Current memory usage")
-    uptime: Optional[str] = Field(
+    cpu: str | None = Field(None, description="Current CPU usage percentage")
+    memory: str | None = Field(None, description="Current memory usage")
+    uptime: str | None = Field(
         None, description="How long the container has been running"
     )
-    cpu_limit: Optional[str] = Field(
+    cpu_limit: str | None = Field(
         None, description="CPU limit defined in YAML resources"
     )
-    memory_limit: Optional[str] = Field(
+    memory_limit: str | None = Field(
         None, description="Memory limit defined in YAML resources"
     )
 
@@ -111,7 +110,7 @@ class UnstableService(BaseModel):
         ..., description="Number of restarts in the requested time window"
     )
     # IST ISO timestamp
-    last_restart_at: Optional[str] = Field(
+    last_restart_at: str | None = Field(
         None,
         description="IST timestamp (ISO) of the most recent restart, if any",
     )
@@ -124,21 +123,17 @@ class RestartEventItem(BaseModel):
     """
 
     # IST ISO timestamp
-    timestamp: str = Field(
-        ..., description="IST time (ISO) when the restart occurred"
-    )
+    timestamp: str = Field(..., description="IST time (ISO) when the restart occurred")
     reason: str = Field(
         ...,
         description=(
             "Why the restart was triggered, e.g. 3_failed_health_checks, manual"
         ),
     )
-    previous_status: Optional[str] = Field(
+    previous_status: str | None = Field(
         None, description="Health status before the restart"
     )
-    new_status: Optional[str] = Field(
-        None, description="Health status after the restart"
-    )
+    new_status: str | None = Field(None, description="Health status after the restart")
 
 
 class FailureReasonCount(BaseModel):
@@ -174,7 +169,7 @@ class AnalyticsSummary(BaseModel):
     total_health_failures: int = Field(
         ..., description="Total health check failures that triggered restarts"
     )
-    most_unstable_services: List[UnstableService] = Field(
+    most_unstable_services: list[UnstableService] = Field(
         ...,
         description="Top services ranked by restart count, most unstable first",
     )
@@ -224,7 +219,7 @@ def dashboard_home(request: Request):
 # ------------------------------------------------
 # List services
 # ------------------------------------------------
-@router.get("/services", response_model=List[Service])
+@router.get("/services", response_model=list[Service])
 def list_services():
     raw_services = get_services()
 
@@ -271,8 +266,8 @@ def stop_service(name: str):
 # ------------------------------------------------
 @router.get("/logs/db")
 def list_logs(
-    service_name: Optional[str] = Query(default=None),
-    q: Optional[str] = Query(default=None),
+    service_name: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
@@ -316,8 +311,8 @@ async def explore_logs(service_name: str, days: int = 1):
 # ------------------------------------------------
 @router.get("/logs")
 def get_logs(
-    service_name: Optional[str] = Query(None),
-    q: Optional[str] = Query(None),
+    service_name: str | None = Query(None),
+    q: str | None = Query(None),
     limit: int = Query(100),
 ):
     if not service_name:
@@ -334,8 +329,8 @@ def get_logs(
 # ------------------------------------------------
 @router.get("/logs/download")
 def download_logs(
-    service_name: Optional[str] = Query(default=None),
-    q: Optional[str] = Query(default=None),
+    service_name: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     format: str = Query("text", pattern="^(text|csv)$"),
 ):
     if format == "csv":
@@ -522,14 +517,12 @@ def analytics_summary(
 # ------------------------------------------------
 @router.get(
     "/analytics/unstable-services",
-    response_model=List[UnstableService],
+    response_model=list[UnstableService],
     summary="Most unstable services",
     description="Top N services ranked by restart count within the requested time window.",
 )
 def analytics_unstable_services(
-    limit: int = Query(
-        5, ge=1, le=20, description="Max number of services to return"
-    ),
+    limit: int = Query(5, ge=1, le=20, description="Max number of services to return"),
     window_hours: int = Query(
         24, ge=1, le=168, description="Look-back window in hours"
     ),
@@ -563,15 +556,13 @@ def analytics_unstable_services(
 # ------------------------------------------------
 @router.get(
     "/analytics/restart-history/{service_name}",
-    response_model=List[RestartEventItem],
+    response_model=list[RestartEventItem],
     summary="Restart history for a service",
     description="Returns a list of restart events for the given service, most recent first.",
 )
 def analytics_restart_history(
     service_name: str,
-    since_hours: int = Query(
-        24, ge=1, le=168, description="Look-back window in hours"
-    ),
+    since_hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
 ):
     since = datetime.utcnow() - timedelta(hours=since_hours)
     history = get_restart_history(service_name, since=since)
@@ -621,4 +612,3 @@ def analytics_failure_reasons(
     )
 
     return breakdown
-    

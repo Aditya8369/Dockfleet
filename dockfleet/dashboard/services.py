@@ -1,7 +1,10 @@
-import subprocess
 import json
+import subprocess
+
 from sqlmodel import Session, select
-from dockfleet.health.models import Service as DBService, engine
+
+from dockfleet.health.models import Service as DBService
+from dockfleet.health.models import engine
 
 
 def get_services():
@@ -23,7 +26,6 @@ def get_services():
                 "restart_policy": svc.restart_policy,
                 "restart_count": svc.restart_count,
                 "last_health_check": getattr(svc, "last_health_check", None),
-
                 # runtime
                 "cpu": "0%",
                 "memory": "0MB",
@@ -39,7 +41,7 @@ def get_services():
         result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{json .}}"],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         for line in result.stdout.splitlines():
@@ -84,7 +86,6 @@ def get_services():
                 if services[service_name]["health_status"] not in ("crashed",):
                     services[service_name]["health_status"] = "stopped"
 
-
     except Exception as e:
         print("Docker ps -a failed:", e)
 
@@ -95,7 +96,7 @@ def get_services():
         result = subprocess.run(
             ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         for line in result.stdout.strip().split("\n"):
@@ -118,4 +119,3 @@ def get_services():
         print("Docker stats failed:", e)
 
     return list(services.values())
-    

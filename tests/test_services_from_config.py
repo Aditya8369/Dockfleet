@@ -1,6 +1,5 @@
 # tests/test_services_from_config.py
-from pprint import pprint
-from dockfleet.cli.config import load_config, DockFleetConfig
+from dockfleet.cli.config import DockFleetConfig, load_config
 from dockfleet.health.services import services_from_config
 
 

@@ -1,7 +1,6 @@
 import logging
 import socket
 import subprocess
-from typing import Optional
 
 import requests
 
@@ -24,28 +23,22 @@ class HealthChecker:
                 self._logger.info("HTTP OK %s (status=%s)", endpoint, code)
                 return True
 
-            self._logger.warning(
-                "HTTP UNHEALTHY %s (status=%s)", endpoint, code
-            )
+            self._logger.warning("HTTP UNHEALTHY %s (status=%s)", endpoint, code)
             return False
 
         except requests.RequestException as exc:
-            self._logger.warning(
-                "HTTP check FAILED %s (%s)", endpoint, exc
-            )
+            self._logger.warning("HTTP check FAILED %s (%s)", endpoint, exc)
             return False
 
     def check_tcp(self, host: str, port: int, timeout: float = 3.0) -> bool:
         # Return True if TCP connection to host:port succeeds, else False.
         try:
-            sock: Optional[socket.socket] = None
+            sock: socket.socket | None = None
             sock = socket.create_connection((host, port), timeout=timeout)
             self._logger.info("TCP OK %s:%s", host, port)
             return True
         except OSError as exc:
-            self._logger.warning(
-                "TCP check FAILED %s:%s (%s)", host, port, exc
-            )
+            self._logger.warning("TCP check FAILED %s:%s (%s)", host, port, exc)
             return False
         finally:
             if sock is not None:

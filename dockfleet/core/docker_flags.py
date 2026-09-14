@@ -24,6 +24,7 @@ def build_env_flags(service_config):
 
     return flags
 
+
 def build_port_flags(config):
     flags = []
     ports = config.get("ports") or []

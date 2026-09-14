@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from dockfleet.dashboard.api import app
 
 client = TestClient(app)

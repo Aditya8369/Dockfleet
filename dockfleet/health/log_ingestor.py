@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
-from .models import Service, LogEvent, engine
+from .models import LogEvent, Service, engine
 
 
 def ingest_docker_logs_once(tail: int = 200) -> None:

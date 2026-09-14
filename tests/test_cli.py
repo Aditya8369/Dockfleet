@@ -1,4 +1,5 @@
 from typer.testing import CliRunner
+
 from dockfleet.cli.main import app
 
 runner = CliRunner()

@@ -1,6 +1,7 @@
 from sqlmodel import Session, select
+
 from dockfleet.cli.config import DockFleetConfig, load_config
-from dockfleet.health.models import Service, init_db, engine
+from dockfleet.health.models import Service, engine, init_db
 from dockfleet.health.seed import bootstrap_from_config
 
 

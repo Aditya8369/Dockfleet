@@ -1,9 +1,13 @@
 import logging
 import re
 import subprocess
+import logging
+import re
+import subprocess
 import threading
 from datetime import datetime
 from typing import Optional
+
 import time
 
 from pydantic import BaseModel
@@ -16,6 +20,7 @@ from dockfleet.core.docker_flags import (
     build_port_flags,
     build_resource_flags,
 )
+from dockfleet.health.logs import store_log_line
 from dockfleet.health.models import Service, engine
 from dockfleet.health.seed import bootstrap_from_config
 from dockfleet.health.status import (
@@ -24,7 +29,6 @@ from dockfleet.health.status import (
     mark_service_stopped,
     record_restart_event,
 )
-from dockfleet.health.logs import store_log_line
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +38,10 @@ _UNSET = object()
 class ServiceStat(BaseModel):
     service_name: str
     container_name: str
-    cpu_percent: Optional[float] = None
-    mem_current: Optional[str] = None
-    mem_percent: Optional[str] = None
-    uptime: Optional[str] = None
+    cpu_percent: float | None = None
+    mem_current: str | None = None
+    mem_percent: str | None = None
+    uptime: str | None = None
     status: str = "unknown"  # running, stopped, missing
 
 
@@ -351,7 +355,9 @@ class Orchestrator:
                 timeout=10,
             )
         except Exception as exc:
-            logger.warning("restart_service: error stopping %s: %s", container_name, exc)
+            logger.warning(
+                "restart_service: error stopping %s: %s", container_name, exc
+            )
 
         # Try to start a fresh container
         try:
@@ -561,9 +567,7 @@ class Orchestrator:
                 return self._get_missing_stats()
 
             lines = [
-                line
-                for line in result.stdout.strip().split("\n")[1:]
-                if line.strip()
+                line for line in result.stdout.strip().split("\n")[1:] if line.strip()
             ]
 
             for line in lines:
@@ -615,7 +619,13 @@ class Orchestrator:
         """Get uptime from docker inspect."""
         try:
             result = subprocess.run(
-                ["docker", "inspect", container_name, "--format", "{{.State.StartedAt}}"],
+                [
+                    "docker",
+                    "inspect",
+                    container_name,
+                    "--format",
+                    "{{.State.StartedAt}}",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=5,

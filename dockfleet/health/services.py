@@ -1,12 +1,14 @@
 import json
+
 from sqlmodel import Session, select
-from .models import Service
+
 from dockfleet.cli.config import (
     DockFleetConfig,
-    ServiceConfig,
     HealthCheckConfig,
-    RestartPolicy,
 )
+
+from .models import Service
+
 
 def services_from_config(config: DockFleetConfig) -> list[Service]:
     services: list[Service] = []
@@ -86,6 +88,7 @@ def services_from_config(config: DockFleetConfig) -> list[Service]:
         services.append(service)
 
     return services
+
 
 def seed_services(config: DockFleetConfig, session: Session) -> None:
     services = services_from_config(config)

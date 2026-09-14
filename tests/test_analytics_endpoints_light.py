@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session
 
-from dockfleet.health.models import Service, RestartEvent, engine, init_db
 from dockfleet.dashboard.routes import (
-    analytics_unstable_services,
-    analytics_restart_history,
     analytics_failure_reasons,
+    analytics_restart_history,
+    analytics_unstable_services,
 )
+from dockfleet.health.models import RestartEvent, Service, engine, init_db
 
 
 def setup_function(_func):
