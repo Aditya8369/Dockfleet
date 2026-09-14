@@ -155,7 +155,7 @@ def load_config(path: Path) -> DockFleetConfig:
     except ValidationError as e:
         typer.echo(f"Configuration Validation Error in '{path}':", err=True)
         for err in e.errors():
-            loc = " -> ".join(str(l) for l in err["loc"])
+            loc = " -> ".join(str(location_part) for location_part in err["loc"])
             msg = err["msg"]
             typer.echo(f" - {loc}: {msg}", err=True)
         raise typer.Exit(code=1)

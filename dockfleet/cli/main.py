@@ -135,6 +135,8 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
         typer.echo("Services started.")
         typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error starting services: {e}")
         raise typer.Exit(code=1)
@@ -157,6 +159,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
         orch.down()
 
         typer.echo("\n✓ Services stopped")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
@@ -176,6 +180,8 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
         config = load_config(path)
         orch = Orchestrator(config)
         orch.ps()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error listing containers: {e}")
         raise typer.Exit(code=1)
@@ -210,6 +216,8 @@ def logs(
                 text=True,
             )
             typer.echo(result.stdout)
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo(f"Service '{service}' not found or container not running.")
         raise typer.Exit(code=1)
@@ -249,6 +257,8 @@ def show_logs(
                     ts_str = "no-time"
 
                 typer.echo(f"[{ts_str}] [{log.service_name}] {log.message}")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Failed to fetch logs: {e}")
         raise typer.Exit(code=1)
@@ -278,6 +288,8 @@ def doctor():
         )
         typer.echo(f"Docker detected: {result.stdout.strip()}")
         typer.echo("✓ Environment looks good")
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo("✗ Docker not found or not running")
         raise typer.Exit(code=1)
@@ -364,6 +376,8 @@ def health_dev(
         except KeyboardInterrupt:
             typer.echo("\nStopping health scheduler...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Health scheduler failed: {e}")
         raise typer.Exit(code=1)
@@ -401,6 +415,8 @@ def self_heal(
         except KeyboardInterrupt:
             typer.echo("\nStopping self-healing loop...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Self-heal command failed: {e}")
         raise typer.Exit(code=1)
