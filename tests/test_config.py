@@ -5,7 +5,7 @@ from dockfleet.cli.config import load_config
 def test_valid_config():
     config = load_config(Path("examples/dockfleet.yaml"))
     assert "api" in config.services
-    assert config.services["api"].image == "my-api:latest"
+    assert config.services["api"].image == "nginx"
 
 def test_missing_image():
     bad_yaml = """
