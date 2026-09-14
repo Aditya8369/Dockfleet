@@ -1,9 +1,10 @@
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional, List, Dict, Union
 import yaml
 import re
+import typer
 
 # Healthcheck Model
 class HealthCheckConfig(BaseModel):
@@ -131,10 +132,25 @@ class DockFleetConfig(BaseModel):
 
 # YAML Loader
 def load_config(path: Path) -> DockFleetConfig:
-    with open(path, "r") as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
 
-    if not data:
-        raise ValueError("Config file is empty")
+        if not data:
+            typer.echo(f"Error: Config file '{path}' is empty.", err=True)
+            raise typer.Exit(code=1)
 
-    return DockFleetConfig(**data)
+        return DockFleetConfig(**data)
+    except yaml.YAMLError as e:
+        typer.echo(f"Error parsing YAML file '{path}':\n{e}", err=True)
+        raise typer.Exit(code=1)
+    except ValidationError as e:
+        typer.echo(f"Configuration Validation Error in '{path}':", err=True)
+        for err in e.errors():
+            loc = " -> ".join(str(l) for l in err["loc"])
+            msg = err["msg"]
+            typer.echo(f" - {loc}: {msg}", err=True)
+        raise typer.Exit(code=1)
+    except FileNotFoundError:
+        typer.echo(f"Error: Configuration file '{path}' not found.", err=True)
+        raise typer.Exit(code=1)
