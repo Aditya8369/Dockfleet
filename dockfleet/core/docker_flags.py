@@ -1,16 +1,12 @@
 def build_resource_flags(service_config: dict) -> list[str]:
-
     flags = []
-
-    memory = service_config.get("memory")
-    cpus = service_config.get("cpus")
-
+    resources = service_config.get("resources") or {}
+    memory = resources.get("memory")
+    cpu = resources.get("cpu")
     if memory:
         flags.extend(["--memory", str(memory)])
-
-    if cpus:
-        flags.extend(["--cpus", str(cpus)])
-
+    if cpu:
+        flags.extend(["--cpus", str(cpu)])
     return flags
 
 
