@@ -1,19 +1,19 @@
 import logging
 import threading
 import time
-from typing import Optional
+
 from sqlmodel import Session, select
+
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
+from dockfleet.core.orchestrator import mark_restart_failed, restart_service
 from dockfleet.health.checker import HealthChecker
 from dockfleet.health.models import Service, engine
 from dockfleet.health.status import (
-    update_service_health,
-    needs_restart,
     mark_restart_successful,
+    needs_restart,
     record_restart_event,
+    update_service_health,
 )
-from dockfleet.core.orchestrator import restart_service, mark_restart_failed
-
 
 DEFAULT_INTERVAL_SECONDS = 60
 
@@ -38,7 +38,7 @@ class HealthScheduler:
         self.interval_seconds = interval_seconds
 
         self._stopped: bool = True
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._logger = logging.getLogger(__name__)
         # allow injecting a fake checker in tests, default to real one.
         self._checker: HealthChecker = checker or HealthChecker()
@@ -86,7 +86,7 @@ class HealthScheduler:
             self._logger.info("HealthScheduler: polling services...")
 
             for name, svc_cfg in self.config.services.items():
-                hc: Optional[HealthCheckConfig] = svc_cfg.healthcheck
+                hc: HealthCheckConfig | None = svc_cfg.healthcheck
 
                 # Skip services without healthcheck
                 if hc is None:
@@ -95,9 +95,7 @@ class HealthScheduler:
                 try:
                     ok = self._run_single_check(name, hc)
                     status_str = "HEALTHY" if ok else "UNHEALTHY"
-                    self._logger.info(
-                        "HealthScheduler: %s -> %s", name, status_str
-                    )
+                    self._logger.info("HealthScheduler: %s -> %s", name, status_str)
 
                     update_service_health(
                         name,
@@ -234,7 +232,7 @@ class HealthScheduler:
         )
         return False
 
-    def _split_host_port(self, endpoint: str) -> tuple[Optional[str], Optional[int]]:
+    def _split_host_port(self, endpoint: str) -> tuple[str | None, int | None]:
         # Helper to split 'host:port' strings safely.
         if ":" not in endpoint:
             return None, None

@@ -1,28 +1,32 @@
 from datetime import datetime
-from typing import Optional
+
 from sqlmodel import Session, select
-from .models import Service, RestartEvent, engine
+
+from .models import RestartEvent, Service, engine
+
 
 def mark_service_running(name: str) -> None:
-    _update_status(name, new_status="running", new_health="healthy", set_last_health=True)
+    _update_status(
+        name, new_status="running", new_health="healthy", set_last_health=True
+    )
 
 
 def mark_service_stopped(name: str) -> None:
     # Normal stop: container stopped but still considered healthy
-    _update_status(name, new_status="stopped", new_health="healthy", set_last_health=False)
+    _update_status(
+        name, new_status="stopped", new_health="healthy", set_last_health=False
+    )
 
 
 def _update_status(
     name: str,
     new_status: str,
-    new_health: Optional[str] = None,
+    new_health: str | None = None,
     set_last_health: bool = False,
 ) -> None:
     """Low-level helper to flip status (and optionally health_status) for a service by name."""
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == name)
-        ).one_or_none()
+        svc = session.exec(select(Service).where(Service.name == name)).one_or_none()
 
         if svc is None:
             print(f"[status] Service '{name}' not found in DB, skipping status update")
@@ -43,7 +47,7 @@ def _update_status(
 def update_service_health(
     name: str,
     is_healthy: bool,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> None:
     """
     Update Service row after a health check.
@@ -59,9 +63,7 @@ def update_service_health(
         consecutive_failures++
     """
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == name)
-        ).one_or_none()
+        svc = session.exec(select(Service).where(Service.name == name)).one_or_none()
 
         if svc is None:
             print(f"[health] Service '{name}' not found in DB")

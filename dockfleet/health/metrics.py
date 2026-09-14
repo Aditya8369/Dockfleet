@@ -1,6 +1,8 @@
 # dockfleet/health/metrics.py
 from sqlmodel import Session, select
+
 from dockfleet.health.models import Service, engine
+
 
 def get_total_restarts() -> int:
     """
@@ -10,6 +12,7 @@ def get_total_restarts() -> int:
         services = session.exec(select(Service)).all()
         return sum(s.restart_count or 0 for s in services)
 
+
 def get_running_services_count() -> int:
     """
     Count how many services are currently running.
@@ -17,6 +20,7 @@ def get_running_services_count() -> int:
     with Session(engine) as session:
         services = session.exec(select(Service)).all()
         return sum(1 for s in services if s.status == "running")
+
 
 def get_health_failures_count() -> int:
     """

@@ -1,7 +1,10 @@
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Iterable, Optional
-from sqlmodel import Session, select, func
+
+from sqlmodel import Session, func, select
+
 from .models import LogEvent, Service, engine
+
 
 def store_log_line(
     service_name: str,
@@ -40,9 +43,10 @@ def store_log_line(
         session.add(event)
         session.commit()
 
+
 def query_logs(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[LogEvent]:
@@ -55,34 +59,28 @@ def query_logs(
     - limit/offset: pagination for dashboard /logs/db and /logs/download
     """
     # hard cap for safety
-    if limit > 1000:
-        limit = 1000
+    limit = min(limit, 1000)
 
     with Session(engine) as session:
         stmt = select(LogEvent)
 
         if service_name:
-            stmt = stmt.where(
-                func.lower(LogEvent.service_name) == service_name.lower()
-            )
+            stmt = stmt.where(func.lower(LogEvent.service_name) == service_name.lower())
 
         if q:
             pattern = f"%{q}%"
             # SQLite: LIKE (case-sensitive by default); can be tuned later.
             stmt = stmt.where(LogEvent.message.like(pattern))
 
-        stmt = (
-            stmt.order_by(LogEvent.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        stmt = stmt.order_by(LogEvent.created_at.desc()).offset(offset).limit(limit)
         events = session.exec(stmt).all()
 
     return list(events)
 
+
 def iter_logs_as_text(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     batch_size: int = 1000,
 ) -> Iterable[str]:
     """
@@ -112,9 +110,10 @@ def iter_logs_as_text(
 
         offset += batch_size
 
+
 def iter_logs_as_csv(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     batch_size: int = 1000,
 ) -> Iterable[str]:
     """
@@ -167,4 +166,3 @@ def iter_logs_as_csv(
             yield "\n".join(lines) + "\n"
 
         offset += batch_size
-        

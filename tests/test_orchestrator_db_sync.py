@@ -1,9 +1,9 @@
 from sqlmodel import Session, select
 
-from dockfleet.health.models import init_db, Service, engine
-from dockfleet.health.services import seed_services
-from dockfleet.cli.config import load_config, DockFleetConfig
+from dockfleet.cli.config import DockFleetConfig, load_config
 from dockfleet.core.orchestrator import Orchestrator
+from dockfleet.health.models import Service, engine, init_db
+from dockfleet.health.services import seed_services
 
 
 def test_orchestrator_updates_db_status(tmp_path):

@@ -1,28 +1,32 @@
+import re
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, ValidationError
-from typing import Optional, List, Dict, Union
-import yaml
-import re
+
 import typer
+import yaml
+from pydantic import BaseModel, ValidationError, field_validator
+
 
 # Healthcheck Model
 class HealthCheckConfig(BaseModel):
     type: str
-    endpoint: Optional[str] = None
-    interval: Optional[int] = None
+    endpoint: str | None = None
+    interval: int | None = None
+
 
 # Restart Policy Enum
+
 
 class RestartPolicy(str, Enum):
     always = "always"
     on_failure = "on-failure"
     never = "never"
 
+
 # Resources Model
 class ResourcesConfig(BaseModel):
-    memory: Optional[str] = None
-    cpu: Optional[float] = None
+    memory: str | None = None
+    cpu: float | None = None
 
     @field_validator("memory")
     @classmethod
@@ -46,18 +50,19 @@ class ResourcesConfig(BaseModel):
 
         return value
 
+
 # Service Model
 class ServiceConfig(BaseModel):
     image: str
     restart: RestartPolicy
-    ports: Optional[List[str]] = None
-    healthcheck: Optional[HealthCheckConfig] = None
-    resources: Optional[ResourcesConfig] = None
-    depends_on: Optional[List[str]] = None
-    environment: Optional[Union[List[str], Dict[str, str]]] = None
-    self_healing: Optional[bool] = None
+    ports: list[str] | None = None
+    healthcheck: HealthCheckConfig | None = None
+    resources: ResourcesConfig | None = None
+    depends_on: list[str] | None = None
+    environment: list[str] | dict[str, str] | None = None
+    self_healing: bool | None = None
 
-    #PORT VALIDATION 
+    # PORT VALIDATION
     @field_validator("ports")
     @classmethod
     def validate_ports(cls, value):
@@ -74,7 +79,7 @@ class ServiceConfig(BaseModel):
 
         return value
 
-    #HEALTHCHECK VALIDATION 
+    # HEALTHCHECK VALIDATION
     @field_validator("healthcheck")
     @classmethod
     def validate_healthcheck(cls, value):
@@ -89,7 +94,7 @@ class ServiceConfig(BaseModel):
 
         return value
 
-    #ENV VALIDATION
+    # ENV VALIDATION
     @field_validator("environment")
     @classmethod
     def validate_environment(cls, value):
@@ -112,12 +117,14 @@ class ServiceConfig(BaseModel):
 
         return value
 
+
 # Root Config Model
+
 
 class DockFleetConfig(BaseModel):
     self_healing: bool = True
-    services: Dict[str, ServiceConfig]
-    
+    services: dict[str, ServiceConfig]
+
     @field_validator("services")
     @classmethod
     def validate_depends_on(cls, services):
@@ -129,6 +136,7 @@ class DockFleetConfig(BaseModel):
                             f"{name}: depends_on references unknown service '{dep}'"
                         )
         return services
+
 
 # YAML Loader
 def load_config(path: Path) -> DockFleetConfig:

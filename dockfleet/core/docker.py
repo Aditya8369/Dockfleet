@@ -1,5 +1,6 @@
 import subprocess
 
+
 class DockerManager:
     def create_network(self, name: str):
         try:
@@ -7,12 +8,11 @@ class DockerManager:
                 ["docker", "network", "create", name],
                 check=True,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
         except subprocess.CalledProcessError:
             # network probably already exists
             pass
-
 
     def run_container(self, image, name, flags=None, network=None):
 
@@ -28,13 +28,10 @@ class DockerManager:
 
         subprocess.run(cmd, check=True)
 
-
     def remove_container(self, name):
 
         result = subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True
+            ["docker", "rm", "-f", name], capture_output=True, text=True
         )
 
         if result.returncode != 0:
@@ -44,14 +41,7 @@ class DockerManager:
                 raise RuntimeError(result.stderr)
 
     def stop_container(self, name):
-        subprocess.run(
-            ["docker", "stop", name],
-            check=True
-        )
-
+        subprocess.run(["docker", "stop", name], check=True)
 
     def list_containers(self):
-        subprocess.run(
-            ["docker", "ps"],
-            check=True
-        )
+        subprocess.run(["docker", "ps"], check=True)

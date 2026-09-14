@@ -1,9 +1,9 @@
 from sqlmodel import Session, select
 
-from dockfleet.health.models import init_db, Service, engine
+from dockfleet.cli.config import DockFleetConfig, load_config
+from dockfleet.health.models import Service, engine, init_db
 from dockfleet.health.services import seed_services
 from dockfleet.health.status import mark_service_running, mark_service_stopped
-from dockfleet.cli.config import load_config, DockFleetConfig
 
 
 def test_mark_service_running_and_stopped(tmp_path):
@@ -30,9 +30,7 @@ def test_mark_service_running_and_stopped(tmp_path):
 
     # 4) Status initially "unknown"
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == service_name)
-        ).one()
+        svc = session.exec(select(Service).where(Service.name == service_name)).one()
         assert svc.status == "stopped"
 
     # 5) Mark running
@@ -40,9 +38,7 @@ def test_mark_service_running_and_stopped(tmp_path):
 
     # 6) Verify running in DB
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == service_name)
-        ).one()
+        svc = session.exec(select(Service).where(Service.name == service_name)).one()
         assert svc.status == "running"
 
     # 7) Mark stopped
@@ -50,7 +46,5 @@ def test_mark_service_running_and_stopped(tmp_path):
 
     # 8) Verify stopped in DB
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == service_name)
-        ).one()
+        svc = session.exec(select(Service).where(Service.name == service_name)).one()
         assert svc.status == "stopped"

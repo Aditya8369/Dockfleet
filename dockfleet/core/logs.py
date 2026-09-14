@@ -1,26 +1,30 @@
-import subprocess
-import logging
 import asyncio
-from typing import Optional
+import logging
+import subprocess
 
 from dockfleet.core.orchestrator import get_container_name
 from dockfleet.health.logs import store_log_line as store_log_line_in_db
 
 logger = logging.getLogger(__name__)
 
+
 async def stream_container_logs(service_name: str):
     """100% reliable: sync generator in async wrapper."""
     container = f"dockfleet_{service_name}"
-    
+
     async def event_gen():
         max_retries = 20
         for attempt in range(max_retries):
             proc = None
             try:
-                cmd = ["docker", "logs", "--tail", "5", "-f",  container]
+                cmd = ["docker", "logs", "--tail", "5", "-f", container]
                 proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, universal_newlines=True
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
                 )
                 loop = asyncio.get_event_loop()
                 while True:
@@ -30,8 +34,12 @@ async def stream_container_logs(service_name: str):
                     line = line.rstrip()
                     if line:
                         yield f"data: {line}\n\n"
-                        store_log_line_in_db(service_name=service_name, message=line, source="docker-logs")
-    
+                        store_log_line_in_db(
+                            service_name=service_name,
+                            message=line,
+                            source="docker-logs",
+                        )
+
             except Exception:
                 pass
             finally:
@@ -41,14 +49,15 @@ async def stream_container_logs(service_name: str):
                         proc.wait(timeout=1)
                     except:
                         proc.kill()
-            
+
             if attempt < max_retries - 1:
                 await asyncio.sleep(1)
-        
+
         yield "data: [dockfleet] Max retries\n\n"
-    
+
     async for event in event_gen():
         yield event
+
 
 def stream_logs(service_name: str):
     """Sync wrapper: returns an iterator of plain log lines (no SSE formatting)."""
@@ -74,6 +83,7 @@ def stream_logs(service_name: str):
         logger.error("Failed to stream logs (sync) for %s: %s", service_name, e)
         return []
 
+
 def get_logs_services(service_name: str, limit: int = 100):
     """Fetch last N logs (non-streaming)."""
     container = get_container_name(service_name)
@@ -87,7 +97,7 @@ def get_logs_services(service_name: str, limit: int = 100):
         logs = result.stdout.strip().split("\n")
         return logs
     except Exception as e:
-        return [f"Error fetching logs: {str(e)}"]
+        return [f"Error fetching logs: {e!s}"]
 
 
 def store_log_line(service_name: str, message: str) -> None:

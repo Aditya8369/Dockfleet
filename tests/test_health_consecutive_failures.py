@@ -1,8 +1,9 @@
 from sqlmodel import Session, select
-from dockfleet.health.models import init_db, Service, engine
+
+from dockfleet.cli.config import DockFleetConfig, load_config
+from dockfleet.health.models import Service, engine, init_db
 from dockfleet.health.services import seed_services
 from dockfleet.health.status import update_service_health
-from dockfleet.cli.config import load_config, DockFleetConfig
 
 
 def test_consecutive_failures_and_status_transitions(tmp_path):

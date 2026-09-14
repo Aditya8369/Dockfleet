@@ -1,21 +1,21 @@
-import sys
-import subprocess
-from pathlib import Path
 import logging
+import subprocess
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import typer
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
-from dockfleet.core.orchestrator import Orchestrator, get_logs
-from dockfleet.health.seed import bootstrap_from_path
-from dockfleet.health.scheduler import HealthScheduler
-from dockfleet.health.status import update_service_health
-from dockfleet.health.models import engine
+from dockfleet.core.orchestrator import Orchestrator
 from dockfleet.health.logs import LogEvent  # make sure this exists
+from dockfleet.health.models import engine
+from dockfleet.health.scheduler import HealthScheduler
+from dockfleet.health.seed import bootstrap_from_path
+from dockfleet.health.status import update_service_health
 
 app = typer.Typer(help="DockFleet CLI - Manage Docker services from YAML configuration")
 validate_app = typer.Typer()
@@ -45,6 +45,7 @@ def setup_health_logging() -> None:
 # ------------------------------------------------
 # validate
 # ------------------------------------------------
+
 
 @validate_app.callback(invoke_without_command=True)
 def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -80,6 +81,7 @@ def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # seed
 # ------------------------------------------------
 
+
 @app.command()
 def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Initialize the service database and register services from the configuration."""
@@ -95,6 +97,7 @@ def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # up
 # ------------------------------------------------
+
 
 @app.command()
 def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -141,6 +144,7 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # down
 # ------------------------------------------------
 
+
 @app.command()
 def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Stop and remove all containers managed by DockFleet."""
@@ -162,6 +166,7 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ps
 # ------------------------------------------------
 
+
 @app.command()
 def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Show currently running DockFleet containers."""
@@ -179,6 +184,7 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # logs (docker logs)
 # ------------------------------------------------
+
 
 @app.command()
 def logs(
@@ -213,6 +219,7 @@ def logs(
 # show-logs (DB logs)
 # ------------------------------------------------
 
+
 @app.command("show-logs")
 def show_logs(
     service: str = typer.Option(None, "--service", help="Filter by service name"),
@@ -235,9 +242,7 @@ def show_logs(
                 return
 
             for log in logs:
-                ts = getattr(log, "timestamp", None) or getattr(
-                    log, "created_at", None
-                )
+                ts = getattr(log, "timestamp", None) or getattr(log, "created_at", None)
                 if ts:
                     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
                 else:
@@ -252,6 +257,7 @@ def show_logs(
 # ------------------------------------------------
 # doctor
 # ------------------------------------------------
+
 
 @app.command()
 def doctor():
@@ -280,6 +286,7 @@ def doctor():
 # ------------------------------------------------
 # health-dev (unchanged behavior, for dev)
 # ------------------------------------------------
+
 
 @app.command("health-dev")
 def health_dev(
@@ -318,9 +325,7 @@ def health_dev(
 
         # check if any service has healthcheck defined
         services_with_health = [
-            name
-            for name, svc in config.services.items()
-            if svc.healthcheck is not None
+            name for name, svc in config.services.items() if svc.healthcheck is not None
         ]
 
         if not services_with_health:
@@ -368,6 +373,7 @@ def health_dev(
 # self-heal (unchanged; continuous health loop only)
 # ------------------------------------------------
 
+
 @app.command("self-heal")
 def self_heal(
     path: Path = typer.Argument("examples/dockfleet.yaml"),
@@ -403,6 +409,7 @@ def self_heal(
 # ------------------------------------------------
 # health-logs (NEW)
 # ------------------------------------------------
+
 
 @app.command("health-logs")
 def health_logs(

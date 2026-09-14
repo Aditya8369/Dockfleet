@@ -1,13 +1,14 @@
 from sqlmodel import Session, select
-from dockfleet.health.models import init_db, Service, engine
-from dockfleet.health.services import seed_services
-from dockfleet.health.scheduler import HealthScheduler
-from dockfleet.health.status import update_service_health
+
 from dockfleet.cli.config import (
-    load_config,
     DockFleetConfig,
     HealthCheckConfig,
+    load_config,
 )
+from dockfleet.health.models import Service, engine, init_db
+from dockfleet.health.scheduler import HealthScheduler
+from dockfleet.health.services import seed_services
+from dockfleet.health.status import update_service_health
 
 
 class FakeChecker:

@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
-from dockfleet.health.models import init_db, Service as DBService, engine
+from dockfleet.cli.config import load_config
+from dockfleet.core.orchestrator import get_orchestrator
 from dockfleet.dashboard.routes import router as dashboard_router
 from dockfleet.health.log_ingestor import ingest_docker_logs_once
-from dockfleet.cli.config import load_config
+from dockfleet.health.models import Service as DBService
+from dockfleet.health.models import engine, init_db
 from dockfleet.health.scheduler import HealthScheduler
 from dockfleet.health.seed import bootstrap_from_path
-from dockfleet.core.orchestrator import get_orchestrator
-
 
 # ✅ Create app FIRST
 app = FastAPI()
@@ -112,4 +113,3 @@ def fetch_services() -> list[dict]:
             }
             for svc in services
         ]
-        
