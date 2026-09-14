@@ -46,8 +46,11 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                     continue
 
                 now = datetime.now(timezone.utc)
-                if latest_ts is not None and now <= latest_ts:
-                    now = latest_ts + timedelta(microseconds=1)
+                if latest_ts is not None:
+                    if latest_ts.tzinfo is None:
+                        latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+                    if now <= latest_ts:
+                        now = latest_ts + timedelta(microseconds=1)
 
                 event = LogEvent(
                     service_id=svc.id,

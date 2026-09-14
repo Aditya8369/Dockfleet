@@ -27,8 +27,15 @@ async def stream_container_logs(service_name: str):
                     universal_newlines=True,
                 )
                 loop = asyncio.get_running_loop()
-                queue = asyncio.Queue()
+                queue = asyncio.Queue(maxsize=1000)
                 stderr_buffer = []
+
+                def enqueue_item(item):
+                    try:
+                        fut = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+                        fut.result()
+                    except Exception as e:
+                        logger.debug("Failed to enqueue item for %s: %s", container, e)
 
                 def read_stdout():
                     try:
@@ -37,11 +44,14 @@ async def stream_container_logs(service_name: str):
                                 line = proc.stdout.readline()
                                 if not line or not isinstance(line, str):
                                     break
-                                loop.call_soon_threadsafe(queue.put_nowait, ("stdout", line))
+                                enqueue_item(("stdout", line))
+                        enqueue_item(("stdout", None))
+                    except (OSError, ValueError) as e:
+                        logger.exception("Stdout reader expected exception for %s", container)
+                        enqueue_item(("stdout_error", e))
                     except Exception as e:
-                        logger.debug("Stdout reader exception for %s: %s", container, e)
-                    finally:
-                        loop.call_soon_threadsafe(queue.put_nowait, ("stdout", None))
+                        logger.exception("Stdout reader unexpected exception for %s", container)
+                        enqueue_item(("stdout_error", e))
 
                 def read_stderr():
                     try:
@@ -50,37 +60,52 @@ async def stream_container_logs(service_name: str):
                                 line = proc.stderr.readline()
                                 if not line or not isinstance(line, str):
                                     break
-                                loop.call_soon_threadsafe(queue.put_nowait, ("stderr", line))
+                                enqueue_item(("stderr", line))
+                        enqueue_item(("stderr", None))
+                    except (OSError, ValueError) as e:
+                        logger.exception("Stderr reader expected exception for %s", container)
+                        enqueue_item(("stderr_error", e))
                     except Exception as e:
-                        logger.debug("Stderr reader exception for %s: %s", container, e)
-                    finally:
-                        loop.call_soon_threadsafe(queue.put_nowait, ("stderr", None))
+                        logger.exception("Stderr reader unexpected exception for %s", container)
+                        enqueue_item(("stderr_error", e))
 
                 t_stdout = loop.run_in_executor(None, read_stdout)
                 t_stderr = loop.run_in_executor(None, read_stderr)
 
                 active_streams = 2
                 while active_streams > 0:
-                    stream_type, line = await queue.get()
-                    if line is None:
+                    stream_type, payload = await queue.get()
+                    if stream_type in ("stdout_error", "stderr_error"):
+                        logger.error(
+                            "%s encountered error for container %s: %s",
+                            stream_type,
+                            container,
+                            payload,
+                        )
+                        yield f"data: [dockfleet] Error reading logs for '{container}': {payload}\n\n"
+                        return
+
+                    if payload is None:
                         active_streams -= 1
                         continue
 
-                    cleaned_line = line.rstrip()
+                    cleaned_line = payload.rstrip()
                     if cleaned_line:
-                        if stream_type == "stdout":
-                            try:
-                                store_log_line_in_db(
-                                    service_name=service_name,
-                                    message=cleaned_line,
-                                    source="docker-logs",
-                                )
-                            except Exception:
-                                logger.exception(
-                                    "Failed to persist stdout log line for %s", service_name
-                                )
-                        elif stream_type == "stderr":
+                        try:
+                            store_log_line_in_db(
+                                service_name=service_name,
+                                message=cleaned_line,
+                                source=f"docker-logs-{stream_type}",
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to persist %s log line for %s", stream_type, service_name
+                            )
+
+                        if stream_type == "stderr":
                             stderr_buffer.append(cleaned_line)
+                            if len(stderr_buffer) > 100:
+                                stderr_buffer.pop(0)
 
                         yield f"data: {cleaned_line}\n\n"
 

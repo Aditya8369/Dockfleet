@@ -51,7 +51,6 @@ def test_store_log_line_persists_datetime_instance():
 
         assert event is not None
         assert isinstance(event.created_at, datetime)
-        assert event.created_at.tzinfo is not None or isinstance(event.created_at, datetime)
 
 
 def test_format_created_at_with_datetime():
