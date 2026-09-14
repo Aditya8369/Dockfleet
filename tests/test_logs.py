@@ -279,3 +279,105 @@ async def test_no_such_image_fails_fast(mock_popen, mock_store):
     assert len(events) == 1
     assert "not found" in events[0].lower()
     mock_popen.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch('dockfleet.core.logs.store_log_line_in_db')
+@patch('dockfleet.core.logs.subprocess.Popen')
+async def test_permission_denied_in_stderr_fails_fast(mock_popen, mock_store):
+    """Permission denied in stderr -> fails fast without retrying 20 times."""
+    mock_proc = MagicMock()
+    mock_proc.stdout.readline = MagicMock(return_value="")
+    mock_proc.stderr.readline = MagicMock(
+        side_effect=["permission denied: docker socket access required\n", ""]
+    )
+    mock_proc.wait = MagicMock(return_value=1)
+    mock_proc.returncode = 1
+    mock_proc.terminate = MagicMock()
+    mock_proc.poll = MagicMock(return_value=0)
+    mock_popen.return_value = mock_proc
+
+    events = []
+    async for event in stream_container_logs("api"):
+        events.append(event)
+
+    assert len(events) >= 1
+    assert "permission denied" in events[-1].lower()
+    mock_popen.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch('dockfleet.core.logs.store_log_line_in_db')
+@patch('dockfleet.core.logs.subprocess.Popen')
+async def test_unknown_non_zero_exit_fails_fast(mock_popen, mock_store):
+    """Unknown non-zero exit code -> generic diagnostic, fails fast."""
+    mock_proc = MagicMock()
+    mock_proc.stdout.readline = MagicMock(return_value="")
+    mock_proc.stderr.readline = MagicMock(
+        side_effect=["fatal error: unexpected internal crash\n", ""]
+    )
+    mock_proc.wait = MagicMock(return_value=1)
+    mock_proc.returncode = 1
+    mock_proc.terminate = MagicMock()
+    mock_proc.poll = MagicMock(return_value=0)
+    mock_popen.return_value = mock_proc
+
+    events = []
+    async for event in stream_container_logs("api"):
+        events.append(event)
+
+    assert len(events) >= 1
+    assert "error streaming logs" in events[-1].lower() or "exited with code 1" in events[-1].lower()
+    mock_popen.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch('dockfleet.core.logs.store_log_line_in_db')
+@patch('dockfleet.core.logs.subprocess.Popen')
+async def test_db_persistence_failure_isolated(mock_popen, mock_store):
+    """Database persistence exception -> stream continues, error is logged."""
+    mock_store.side_effect = Exception("Database connection failure")
+
+    mock_proc = MagicMock()
+    mock_proc.stdout.readline = MagicMock(
+        side_effect=["log line 1\n", "log line 2\n", ""]
+    )
+    mock_proc.stderr.readline = MagicMock(return_value="")
+    mock_proc.wait = MagicMock(return_value=0)
+    mock_proc.returncode = 0
+    mock_proc.terminate = MagicMock()
+    mock_proc.poll = MagicMock(return_value=0)
+    mock_popen.return_value = mock_proc
+
+    events = []
+    async for event in stream_container_logs("api"):
+        events.append(event)
+
+    assert len(events) == 2
+    assert "log line 1" in events[0]
+    assert "log line 2" in events[1]
+
+
+@pytest.mark.asyncio
+@patch('dockfleet.core.logs.store_log_line_in_db')
+@patch('dockfleet.core.logs.subprocess.Popen')
+async def test_cleanup_failure_logged(mock_popen, mock_store, caplog):
+    """Cleanup failure when terminating/killing process -> logs warning with exc_info."""
+    import logging
+
+    mock_proc = MagicMock()
+    mock_proc.stdout.readline = MagicMock(return_value="")
+    mock_proc.stderr.readline = MagicMock(return_value="")
+    mock_proc.wait = MagicMock(return_value=0)
+    mock_proc.returncode = 0
+    mock_proc.poll = MagicMock(return_value=None)
+    mock_proc.terminate = MagicMock(side_effect=Exception("Terminate failed"))
+    mock_proc.kill = MagicMock(side_effect=Exception("Kill failed"))
+    mock_popen.return_value = mock_proc
+
+    with caplog.at_level(logging.WARNING, logger="dockfleet.core.logs"):
+        events = []
+        async for event in stream_container_logs("api"):
+            events.append(event)
+
+    assert "failed to kill process" in caplog.text.lower()

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 async def stream_container_logs(service_name: str):
-    """100% reliable: sync generator in async wrapper."""
+    """100% reliable: async log streaming with concurrent stdout/stderr draining."""
     container = f"dockfleet_{service_name}"
 
     async def event_gen():
@@ -19,43 +19,132 @@ async def stream_container_logs(service_name: str):
             try:
                 cmd = ["docker", "logs", "--tail", "5", "-f", container]
                 proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, bufsize=1, universal_newlines=True
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
                 )
-                loop = asyncio.get_event_loop()
-                while True:
-                    line = await loop.run_in_executor(None, proc.stdout.readline)
-                    if not line:
-                        break
-                    line = line.rstrip()
-                    if line:
-                        yield f"data: {line}\n\n"
-                        store_log_line_in_db(service_name=service_name, message=line, source="docker-logs")
+                loop = asyncio.get_running_loop()
+                queue = asyncio.Queue()
+                stderr_buffer = []
 
-                # Check process exit code after stdout is exhausted
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
+                def read_stdout():
+                    try:
+                        if proc.stdout is not None:
+                            while True:
+                                line = proc.stdout.readline()
+                                if not line or not isinstance(line, str):
+                                    break
+                                loop.call_soon_threadsafe(queue.put_nowait, ("stdout", line))
+                    except Exception as e:
+                        logger.debug("Stdout reader exception for %s: %s", container, e)
+                    finally:
+                        loop.call_soon_threadsafe(queue.put_nowait, ("stdout", None))
+
+                def read_stderr():
+                    try:
+                        if proc.stderr is not None:
+                            while True:
+                                line = proc.stderr.readline()
+                                if not line or not isinstance(line, str):
+                                    break
+                                loop.call_soon_threadsafe(queue.put_nowait, ("stderr", line))
+                    except Exception as e:
+                        logger.debug("Stderr reader exception for %s: %s", container, e)
+                    finally:
+                        loop.call_soon_threadsafe(queue.put_nowait, ("stderr", None))
+
+                t_stdout = loop.run_in_executor(None, read_stdout)
+                t_stderr = loop.run_in_executor(None, read_stderr)
+
+                active_streams = 2
+                while active_streams > 0:
+                    stream_type, line = await queue.get()
+                    if line is None:
+                        active_streams -= 1
+                        continue
+
+                    cleaned_line = line.rstrip()
+                    if cleaned_line:
+                        if stream_type == "stdout":
+                            try:
+                                store_log_line_in_db(
+                                    service_name=service_name,
+                                    message=cleaned_line,
+                                    source="docker-logs",
+                                )
+                            except Exception:
+                                logger.exception(
+                                    "Failed to persist stdout log line for %s", service_name
+                                )
+                        elif stream_type == "stderr":
+                            stderr_buffer.append(cleaned_line)
+
+                        yield f"data: {cleaned_line}\n\n"
+
+                await asyncio.gather(t_stdout, t_stderr, return_exceptions=True)
+
+                # Check process exit code after streams EOF
+                def wait_proc():
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
+
+                await loop.run_in_executor(None, wait_proc)
 
                 if proc.returncode != 0:
-                    stderr_output = proc.stderr.read().strip() if proc.stderr else ""
-                    if "no such container" in stderr_output.lower() or "no such image" in stderr_output.lower():
+                    stderr_output = "\n".join(stderr_buffer).strip()
+                    if not stderr_output and proc.stderr:
+                        try:
+                            stderr_output = proc.stderr.read().strip()
+                        except Exception:
+                            pass
+
+                    stderr_lower = stderr_output.lower()
+
+                    if "no such container" in stderr_lower or "no such image" in stderr_lower:
                         logger.error("Container %s does not exist: %s", container, stderr_output)
                         yield f"data: [dockfleet] Container '{container}' not found\n\n"
                         return
+                    elif "permission denied" in stderr_lower or "access is denied" in stderr_lower:
+                        logger.error("Permission denied accessing logs for %s: %s", container, stderr_output)
+                        yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
+                        return
+                    elif (
+                        "connection refused" in stderr_lower
+                        or "cannot connect" in stderr_lower
+                        or "is the docker daemon running" in stderr_lower
+                    ):
+                        logger.warning(
+                            "Docker daemon unreachable for %s (attempt %d/%d): %s",
+                            container,
+                            attempt + 1,
+                            max_retries,
+                            stderr_output,
+                        )
                     else:
-                        # Other non-zero exit codes - transient, retry
-                        logger.warning("Docker logs exited with code %d for %s (attempt %d/%d): %s",
-                                     proc.returncode, container, attempt + 1, max_retries, stderr_output)
+                        logger.error(
+                            "Docker logs exited with code %d for %s: %s",
+                            proc.returncode,
+                            container,
+                            stderr_output,
+                        )
+                        yield f"data: [dockfleet] Error streaming logs: {stderr_output or f'exited with code {proc.returncode}'}\n\n"
+                        return
                 else:
-                    # Success (stdout exhausted normally) - exit
                     return
 
             except FileNotFoundError:
                 logger.error("Docker binary not found. Cannot stream logs for %s", container)
                 yield "data: [dockfleet] Docker is not installed or not in PATH\n\n"
+                return
+            except PermissionError as e:
+                logger.error("Permission denied accessing logs for %s: %s", container, e)
+                yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
                 return
             except Exception as e:
                 error_msg = str(e).lower()
@@ -69,23 +158,43 @@ async def stream_container_logs(service_name: str):
                     yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
                     return
                 elif "connection refused" in error_msg or "cannot connect" in error_msg:
-                    logger.warning("Docker daemon unreachable for %s (attempt %d/%d): %s",
-                                 container, attempt + 1, max_retries, e)
+                    logger.warning(
+                        "Docker daemon unreachable for %s (attempt %d/%d): %s",
+                        container,
+                        attempt + 1,
+                        max_retries,
+                        e,
+                    )
                 else:
-                    logger.exception("Unexpected error streaming logs for %s (attempt %d/%d)",
-                               container, attempt + 1, max_retries)
+                    logger.exception(
+                        "Unexpected error streaming logs for %s (attempt %d/%d)",
+                        container,
+                        attempt + 1,
+                        max_retries,
+                    )
                     yield f"data: [dockfleet] Error streaming logs: {e}\n\n"
                     return
             finally:
                 if proc is not None:
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=1)
-                    except Exception:  # noqa: BLE001 — cleanup must not raise
+                    def cleanup():
                         try:
-                            proc.kill()
-                        except Exception:  # noqa: BLE001, S110 — best-effort kill
-                            pass
+                            if proc.poll() is None:
+                                proc.terminate()
+                                proc.wait(timeout=1)
+                        except Exception:
+                            try:
+                                if proc.poll() is None:
+                                    proc.kill()
+                                    proc.wait()
+                            except Exception:
+                                logger.warning(
+                                    "Failed to kill process for container %s on attempt %d",
+                                    container,
+                                    attempt + 1,
+                                    exc_info=True,
+                                )
+
+                    await loop.run_in_executor(None, cleanup)
 
             if attempt < max_retries - 1:
                 await asyncio.sleep(1)
