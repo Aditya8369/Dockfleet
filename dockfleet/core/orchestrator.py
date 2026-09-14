@@ -251,17 +251,8 @@ class Orchestrator:
                 raise ValueError(f"Service '{name}' missing 'image'")
 
             # DEFAULTS
-            service_config["env"] = service_config.get("env") or {}
-            service_config["ports"] = service_config.get("ports") or []
 
-            # FIX env (list → dict)
-            if isinstance(service_config["env"], list):
-                env_dict = {}
-                for item in service_config["env"]:
-                    if "=" in item:
-                        k, v = item.split("=", 1)
-                        env_dict[k] = v
-                service_config["env"] = env_dict
+            service_config["ports"] = service_config.get("ports") or []
 
             # FIX ports (dict → list)
             if isinstance(service_config["ports"], dict):
