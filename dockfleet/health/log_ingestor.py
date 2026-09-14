@@ -1,9 +1,7 @@
-# dockfleet/health/log_ingestor.py
-
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
@@ -47,7 +45,7 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                 if not line:
                     continue
 
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
                 if latest_ts is not None and now <= latest_ts:
                     now = latest_ts + timedelta(microseconds=1)
 

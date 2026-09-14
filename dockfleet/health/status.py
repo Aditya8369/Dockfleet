@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
@@ -38,7 +38,7 @@ def _update_status(
             svc.health_status = new_health
 
         if set_last_health:
-            svc.last_health_check = datetime.utcnow()
+            svc.last_health_check = datetime.now(timezone.utc)
 
         session.add(svc)
         session.commit()
@@ -69,7 +69,7 @@ def update_service_health(
             print(f"[health] Service '{name}' not found in DB")
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         svc.last_health_check = now
 
         if is_healthy:
@@ -115,7 +115,7 @@ def record_restart_event(service: Service, reason: str) -> None:
     event = RestartEvent(
         service_id=service.id,
         service_name=service.name,
-        restarted_at=datetime.utcnow(),
+        restarted_at=datetime.now(timezone.utc),
         reason=reason,
         previous_status=service.status,
         new_status="running",  # intended post-restart status
@@ -174,7 +174,7 @@ def record_manual_restart_event(service_name: str) -> None:
         event = RestartEvent(
             service_id=svc.id,
             service_name=svc.name,
-            restarted_at=datetime.utcnow(),
+            restarted_at=datetime.now(timezone.utc),
             reason="manual_dashboard_restart",
             previous_status=previous_status,
             new_status="running",
