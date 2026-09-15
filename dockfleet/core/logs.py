@@ -13,6 +13,7 @@ async def stream_container_logs(service_name: str):
     container = f"dockfleet_{service_name}"
 
     async def event_gen():
+        """Asynchronous generator yielding log events with retry logic."""
         max_retries = 20
         for attempt in range(max_retries):
             proc = None
@@ -31,6 +32,7 @@ async def stream_container_logs(service_name: str):
                 stderr_buffer = []
 
                 def enqueue_item(item):
+                    """Enqueue log line into asyncio queue thread-safely."""
                     try:
                         fut = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
                         fut.result()
@@ -38,6 +40,7 @@ async def stream_container_logs(service_name: str):
                         logger.debug("Failed to enqueue item for %s: %s", container, e)
 
                 def read_stdout():
+                    """Drain stdout stream lines and queue them."""
                     try:
                         if proc.stdout is not None:
                             while True:
@@ -54,6 +57,7 @@ async def stream_container_logs(service_name: str):
                         enqueue_item(("stdout_error", e))
 
                 def read_stderr():
+                    """Drain stderr stream lines and queue them."""
                     try:
                         if proc.stderr is not None:
                             while True:
@@ -113,6 +117,7 @@ async def stream_container_logs(service_name: str):
 
                 # Check process exit code after streams EOF
                 def wait_proc():
+                    """Wait for process completion with timeout fallback."""
                     try:
                         proc.wait(timeout=5)
                     except subprocess.TimeoutExpired:
@@ -202,6 +207,7 @@ async def stream_container_logs(service_name: str):
             finally:
                 if proc is not None:
                     def cleanup():
+                        """Terminate and kill subprocess safely."""
                         try:
                             if proc.poll() is None:
                                 proc.terminate()

@@ -9,6 +9,8 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 # Healthcheck Model
 class HealthCheckConfig(BaseModel):
+    """Configuration for service health checks (HTTP, TCP, or process)."""
+
     type: str
     endpoint: str | None = None
     interval: int | None = None
@@ -18,6 +20,8 @@ class HealthCheckConfig(BaseModel):
 
 
 class RestartPolicy(str, Enum):
+    """Container restart policy options: always, on-failure, never."""
+
     always = "always"
     on_failure = "on-failure"
     never = "never"
@@ -25,12 +29,15 @@ class RestartPolicy(str, Enum):
 
 # Resources Model
 class ResourcesConfig(BaseModel):
+    """Resource constraints for containers (memory and CPU limits)."""
+
     memory: str | None = None
     cpu: float | None = None
 
     @field_validator("memory")
     @classmethod
     def validate_memory(cls, value):
+        """Validate memory string format, e.g. 512m or 1g."""
         if value is None:
             return value
 
@@ -42,6 +49,7 @@ class ResourcesConfig(BaseModel):
     @field_validator("cpu")
     @classmethod
     def validate_cpu(cls, value):
+        """Validate CPU limit is a positive float."""
         if value is None:
             return value
 
@@ -53,6 +61,8 @@ class ResourcesConfig(BaseModel):
 
 # Service Model
 class ServiceConfig(BaseModel):
+    """Individual service specification in dockfleet.yaml."""
+
     image: str
     restart: RestartPolicy
     ports: list[str] | None = None
@@ -66,6 +76,7 @@ class ServiceConfig(BaseModel):
     @field_validator("ports")
     @classmethod
     def validate_ports(cls, value):
+        """Validate port mappings conform to host:container format."""
         if value is None:
             return value
 
@@ -83,6 +94,7 @@ class ServiceConfig(BaseModel):
     @field_validator("healthcheck")
     @classmethod
     def validate_healthcheck(cls, value):
+        """Validate health check has type and interval specified."""
         if value is None:
             return value
 
@@ -98,6 +110,7 @@ class ServiceConfig(BaseModel):
     @field_validator("environment")
     @classmethod
     def validate_environment(cls, value):
+        """Validate environment variables formatted as list or dict."""
         if value is None:
             return value
 
@@ -122,12 +135,15 @@ class ServiceConfig(BaseModel):
 
 
 class DockFleetConfig(BaseModel):
+    """Top-level Dockfleet deployment configuration model."""
+
     self_healing: bool = True
     services: dict[str, ServiceConfig]
 
     @field_validator("services")
     @classmethod
     def validate_depends_on(cls, services):
+        """Validate dependency references point to existing services."""
         for name, svc in services.items():
             if svc.depends_on:
                 for dep in svc.depends_on:
@@ -140,6 +156,7 @@ class DockFleetConfig(BaseModel):
 
 # YAML Loader
 def load_config(path: Path) -> DockFleetConfig:
+    """Parse and validate YAML configuration file into a DockFleetConfig object."""
     try:
         with open(path, "r") as f:
             data = yaml.safe_load(f)

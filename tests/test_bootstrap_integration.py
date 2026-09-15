@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import DockFleetConfig, load_config
@@ -17,6 +18,9 @@ def test_bootstrap_from_config_seeds_services(tmp_path):
 
     # Act: init DB + seed via bootstrap
     init_db()
+    with Session(engine) as session:
+        session.exec(text("DELETE FROM service"))
+        session.commit()
     bootstrap_from_config(config)
 
     # Assert: services table has one row per service in config

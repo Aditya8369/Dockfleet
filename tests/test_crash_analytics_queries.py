@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from dockfleet.health.models import RestartEvent, Service
+from dockfleet.health.models import ContainerStatus, HealthStatus, RestartEvent, Service
 from dockfleet.health.queries import (
     get_failure_reasons_breakdown,
     get_most_unstable_services,
@@ -43,7 +43,8 @@ def seeded_service_fixture(session, engine):
         name="api",
         image="nginx:latest",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=7,
     )
     session.add(svc)
@@ -108,7 +109,7 @@ def test_failure_reasons_breakdown_counts(seeded_service, engine):
     with patch("dockfleet.health.queries.engine", engine):
         breakdown = get_failure_reasons_breakdown("api", window_hours=24)
 
-    assert breakdown["3_failed_health_checks"] == 4
+    assert breakdown["healthcheck_timeout"] == 4
     assert breakdown["manual_restart"] == 2
     # crash_loop is outside 24h window — must not appear
     assert "crash_loop" not in breakdown
@@ -135,7 +136,7 @@ def test_failure_reasons_breakdown_wider_window_includes_old_events(
         breakdown = get_failure_reasons_breakdown("api", window_hours=48)
 
     assert breakdown["crash_loop"] == 1
-    assert breakdown["3_failed_health_checks"] == 4
+    assert breakdown["healthcheck_timeout"] == 4
 
 
 # ------------------------------------------------
