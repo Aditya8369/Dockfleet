@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 import subprocess
 import threading
@@ -37,11 +38,20 @@ async def stream_container_logs(service_name: str):
                     """Enqueue log line into asyncio queue thread-safely."""
                     if stop_readers.is_set():
                         return
+                    fut = None
                     try:
                         fut = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
                         fut.result(timeout=1.0)
+                    except concurrent.futures.TimeoutError:
+                        if fut:
+                            fut.cancel()
+                        logger.debug("Timed out enqueueing item for %s", container)
+                        stop_readers.set()
                     except Exception as e:
+                        if fut:
+                            fut.cancel()
                         logger.debug("Failed to enqueue item for %s: %s", container, e)
+                        stop_readers.set()
 
                 def read_stdout():
                     """Drain stdout stream lines and queue them."""

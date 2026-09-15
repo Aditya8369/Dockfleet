@@ -373,7 +373,7 @@ class Orchestrator:
             logger.info("%s: restart='never', skipping", service_name)
             return False
 
-        # Concurrency guard: thread check + DB state check
+        # Concurrency guard: thread check
         with self._restart_lock:
             if service_name in self._active_restarts:
                 logger.warning("Restart already in progress for service %s", service_name)
@@ -381,16 +381,11 @@ class Orchestrator:
             self._active_restarts.add(service_name)
 
         try:
-            # Also check DB health_status
+            # Set DB health_status to RESTARTING during restart execution
             with Session(engine) as session:
                 db_svc = session.exec(
                     select(Service).where(Service.name == service_name)
                 ).one_or_none()
-                if db_svc and db_svc.health_status == HealthStatus.RESTARTING:
-                    logger.warning(
-                        "Service %s is already in RESTARTING state in DB", service_name
-                    )
-                    return False
                 if db_svc:
                     db_svc.health_status = HealthStatus.RESTARTING
                     session.add(db_svc)
@@ -527,11 +522,7 @@ class Orchestrator:
             return
 
         if not success:
-            logger.error("restart_service failed %s", service_name)
-            self._mark_restart_failed(
-                service_name,
-                "restart_service returned False",
-            )
+            logger.info("restart_service skipped or already in progress for %s", service_name)
             return
 
         logger.info("%s auto-restarted", service_name)

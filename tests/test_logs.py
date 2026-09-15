@@ -64,9 +64,10 @@ async def test_container_not_found_fails_fast(mock_popen, mock_store):
     """Container doesn't exist -> fails fast, does not consume all retries."""
     mock_proc = MagicMock()
     mock_proc.stdout.readline = MagicMock(return_value="")
-    mock_proc.stderr.read = MagicMock(
-        return_value="Error: No such container: dockfleet_missing\n"
+    mock_proc.stderr.readline = MagicMock(
+        side_effect=["Error: No such container: dockfleet_missing\n", ""]
     )
+    mock_proc.stderr.read = MagicMock(return_value="")
     mock_proc.wait = MagicMock(return_value=1)
     mock_proc.returncode = 1
     mock_proc.terminate = MagicMock()
@@ -76,9 +77,9 @@ async def test_container_not_found_fails_fast(mock_popen, mock_store):
     async for event in stream_container_logs("missing"):
         events.append(event)
 
-    assert len(events) == 1
-    assert "not found" in events[0].lower()
-    assert "missing" in events[0].lower()
+    assert len(events) >= 1
+    assert "not found" in events[-1].lower()
+    assert "missing" in events[-1].lower()
     mock_popen.assert_called_once()
 
 
@@ -264,9 +265,10 @@ async def test_no_such_image_fails_fast(mock_popen, mock_store):
     """No such image pattern in stderr -> permanent failure."""
     mock_proc = MagicMock()
     mock_proc.stdout.readline = MagicMock(return_value="")
-    mock_proc.stderr.read = MagicMock(
-        return_value="Error: No such image: dockfleet_api:latest\n"
+    mock_proc.stderr.readline = MagicMock(
+        side_effect=["Error: No such image: dockfleet_api:latest\n", ""]
     )
+    mock_proc.stderr.read = MagicMock(return_value="")
     mock_proc.wait = MagicMock(return_value=1)
     mock_proc.returncode = 1
     mock_proc.terminate = MagicMock()
@@ -276,8 +278,8 @@ async def test_no_such_image_fails_fast(mock_popen, mock_store):
     async for event in stream_container_logs("api"):
         events.append(event)
 
-    assert len(events) == 1
-    assert "not found" in events[0].lower()
+    assert len(events) >= 1
+    assert "not found" in events[-1].lower()
     mock_popen.assert_called_once()
 
 

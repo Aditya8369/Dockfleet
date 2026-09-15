@@ -250,12 +250,12 @@ def list_services():
 @router.post("/services/{name}/restart", response_model=ActionResponse)
 def restart_service(name: str):
     """Trigger a manual container restart for the given service."""
-    container = f"dockfleet_{name}"
-    result = subprocess.run(["docker", "restart", container], capture_output=True)
-    ok = result.returncode == 0
+    orch = get_orchestrator()
+    ok = orch.restart_service(name)
     if ok:
         record_manual_restart_event(name)
-    return {"message": f"{name} restarted", "ok": ok}
+        return {"message": f"{name} restarted", "ok": True}
+    return {"message": f"Failed to restart {name}", "ok": False}
 
 
 # ------------------------------------------------
