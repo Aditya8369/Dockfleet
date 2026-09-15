@@ -13,12 +13,12 @@ from unittest.mock import MagicMock
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from dockfleet.health.models import Service
+from dockfleet.health.models import ContainerStatus, HealthStatus, Service
 
 # ------------------------------------------------
 # In-memory SQLite engine for tests
 # ------------------------------------------------
-TEST_DB_URL = "sqlite://"
+TEST_DB_URL = "sqlite:///:memory:"
 
 
 @pytest.fixture(name="engine")
@@ -26,7 +26,6 @@ def engine_fixture():
     engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     yield engine
-    SQLModel.metadata.drop_all(engine)
 
 
 @pytest.fixture(name="session")
@@ -45,7 +44,8 @@ def unhealthy_service_fixture(session):
         name="api",
         image="nginx:latest",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=2,
         consecutive_failures=3,  # at threshold — restart should trigger
     )
@@ -110,7 +110,8 @@ def test_restart_skipped_when_policy_is_never(session):
         name="worker",
         image="my-worker:latest",
         restart_policy="never",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=0,
         consecutive_failures=3,
     )
@@ -131,7 +132,8 @@ def test_restart_skipped_below_failure_threshold(session):
         name="redis",
         image="redis:7",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=0,
         consecutive_failures=2,  # one below threshold
     )
@@ -154,13 +156,15 @@ def test_restart_not_called_when_self_healing_disabled():
             name="api",
             restart_policy="always",
             consecutive_failures=3,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
         MagicMock(
             name="worker",
             restart_policy="on-failure",
             consecutive_failures=5,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
     ]
 
@@ -187,12 +191,14 @@ def test_restart_called_when_self_healing_enabled():
         MagicMock(
             restart_policy="always",
             consecutive_failures=3,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
         MagicMock(
             restart_policy="on-failure",
             consecutive_failures=4,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
     ]
     mock_services[0].name = "api"

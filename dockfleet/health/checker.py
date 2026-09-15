@@ -6,7 +6,10 @@ import requests
 
 
 class HealthChecker:
+    """Performs HTTP, TCP, and process-level health checks on services."""
+
     def __init__(self) -> None:
+        """Initialize the health checker logger."""
         # Simple logger for health checks
         self._logger = logging.getLogger(__name__)
 
@@ -31,7 +34,7 @@ class HealthChecker:
             return False
 
     def check_tcp(self, host: str, port: int, timeout: float = 3.0) -> bool:
-        # Return True if TCP connection to host:port succeeds, else False.
+        """Return True if TCP connection to host:port succeeds, else False."""
         try:
             sock: socket.socket | None = None
             sock = socket.create_connection((host, port), timeout=timeout)

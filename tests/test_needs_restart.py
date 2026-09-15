@@ -1,7 +1,7 @@
 from sqlalchemy import text
 from sqlmodel import Session, select
 
-from dockfleet.health.models import Service, engine, init_db
+from dockfleet.health.models import ContainerStatus, HealthStatus, Service, engine, init_db
 from dockfleet.health.status import (
     mark_restart_successful,
     needs_restart,
@@ -17,7 +17,7 @@ def _create_service(
         name=name,
         image="dummy-image",
         restart_policy=restart_policy,
-        status="running",
+        status=ContainerStatus.RUNNING,
     )
     with Session(engine) as session:
         session.add(svc)
@@ -53,7 +53,7 @@ def test_needs_restart_after_three_failures_with_always_policy() -> None:
     svc = _get_service("svc1")
 
     assert svc.consecutive_failures == 3
-    assert svc.health_status == "crashed"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is True
 
 
@@ -67,7 +67,7 @@ def test_needs_restart_after_three_failures_with_on_failure_policy() -> None:
     svc = _get_service("svc2")
 
     assert svc.consecutive_failures == 3
-    assert svc.health_status == "crashed"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is True
 
 
@@ -81,7 +81,7 @@ def test_needs_restart_false_before_threshold() -> None:
     svc = _get_service("svc3")
 
     assert svc.consecutive_failures == 2
-    assert svc.health_status == "crashed"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is False
 
 
@@ -96,7 +96,7 @@ def test_needs_restart_respects_never_policy() -> None:
     svc = _get_service("svc4")
 
     assert svc.consecutive_failures == 3
-    assert svc.health_status == "crashed"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is False
 
 
@@ -117,5 +117,5 @@ def test_consecutive_failures_reset_after_successful_restart() -> None:
 
     svc_after = _get_service("svc5")
     assert svc_after.consecutive_failures == 0
-    assert svc_after.status == "running"
+    assert svc_after.status == ContainerStatus.RUNNING
     assert needs_restart(svc_after) is False

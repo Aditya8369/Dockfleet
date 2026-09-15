@@ -15,7 +15,13 @@ from dockfleet.health.logs import (
     iter_logs_as_text,
     query_logs,
 )
-from dockfleet.health.models import LogEvent, RestartEvent, engine
+from dockfleet.health.models import (
+    ContainerStatus,
+    HealthStatus,
+    LogEvent,
+    RestartEvent,
+    engine,
+)
 from dockfleet.health.queries import (
     get_failure_reasons_breakdown,
     get_most_unstable_services,
@@ -46,6 +52,7 @@ def to_ist_iso(dt: datetime | None) -> str | None:
 # ------------------------------------------------
 @router.get("/health")
 def health_check():
+    """Basic health check endpoint returning service status."""
     return {"status": "ok"}
 
 
@@ -210,6 +217,7 @@ class MetricsSummary(BaseModel):
 # ------------------------------------------------
 @router.get("/", response_class=HTMLResponse)
 def dashboard_home(request: Request):
+    """Render the dashboard HTML home page."""
     return templates.TemplateResponse(
         "index.html",
         {"request": request},
@@ -221,6 +229,7 @@ def dashboard_home(request: Request):
 # ------------------------------------------------
 @router.get("/services", response_model=list[Service])
 def list_services():
+    """List all managed services and their current runtime/health status."""
     raw_services = get_services()
 
     converted: list[dict] = []
@@ -240,12 +249,13 @@ def list_services():
 # ------------------------------------------------
 @router.post("/services/{name}/restart", response_model=ActionResponse)
 def restart_service(name: str):
-    container = f"dockfleet_{name}"
-    result = subprocess.run(["docker", "restart", container], capture_output=True)
-    ok = result.returncode == 0
+    """Trigger a manual container restart for the given service."""
+    orch = get_orchestrator()
+    ok = orch.restart_service(name)
     if ok:
         record_manual_restart_event(name)
-    return {"message": f"{name} restarted", "ok": ok}
+        return {"message": f"{name} restarted", "ok": True}
+    return {"message": f"Failed to restart {name}", "ok": False}
 
 
 # ------------------------------------------------
@@ -253,6 +263,7 @@ def restart_service(name: str):
 # ------------------------------------------------
 @router.post("/services/{name}/stop", response_model=ActionResponse)
 def stop_service(name: str):
+    """Trigger a manual container stop for the given service."""
     container = f"dockfleet_{name}"
     result = subprocess.run(["docker", "stop", container], capture_output=True)
     ok = result.returncode == 0
@@ -271,6 +282,7 @@ def list_logs(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
+    """Query persisted structured logs from SQLite database."""
     events = query_logs(service_name=service_name, q=q, limit=limit, offset=offset)
     return [
         {
@@ -290,6 +302,7 @@ def list_logs(
 # ------------------------------------------------
 @router.get("/logs/explore/{service_name}")
 async def explore_logs(service_name: str, days: int = 1):
+    """Retrieve time-windowed log records for a service."""
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with Session(engine) as session:
@@ -315,6 +328,7 @@ def get_logs(
     q: str | None = Query(None),
     limit: int = Query(100),
 ):
+    """Fetch live tail logs from Docker container."""
     if not service_name:
         return []
 
@@ -333,6 +347,7 @@ def download_logs(
     q: str | None = Query(default=None),
     format: str = Query("text", pattern="^(text|csv)$"),
 ):
+    """Export logs as downloadable text or CSV file stream."""
     if format == "csv":
         return StreamingResponse(
             iter_logs_as_csv(service_name=service_name, q=q),
@@ -359,15 +374,16 @@ def download_logs(
 # ------------------------------------------------
 @router.get("/status")
 def system_status():
+    """Return aggregated count of running, restarting, unhealthy, and stopped services."""
     services = get_services()
 
     total = len(services)
-    running = sum(1 for s in services if s["status"] == "running")
-    restarting = sum(1 for s in services if s["status"] == "restarting")
-    stopped = sum(1 for s in services if s["status"] == "stopped")
+    running = sum(1 for s in services if s["status"] == ContainerStatus.RUNNING.value)
+    restarting = sum(1 for s in services if s["status"] == HealthStatus.RESTARTING.value)
+    stopped = sum(1 for s in services if s["status"] == ContainerStatus.STOPPED.value)
 
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in ("unhealthy", "crashed")
+        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
 
     return {
@@ -384,6 +400,7 @@ def system_status():
 # ------------------------------------------------
 @router.get("/logs/stream/{service}")
 async def stream_logs(service: str):
+    """Server-Sent Events (SSE) endpoint to stream real-time container log lines."""
     async def event_stream():
         try:
             async for line in stream_container_logs(service):
@@ -421,18 +438,19 @@ async def stream_logs(service: str):
     ),
 )
 def get_metrics():
+    """Return a real-time system metrics snapshot for all services."""
     services = get_services()
 
     total = len(services)
-    running = sum(1 for s in services if s.get("health_status") == "healthy")
+    running = sum(1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value)
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in ("unhealthy", "crashed")
+        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
     stopped = sum(
         1
         for s in services
         if s.get("health_status")
-        not in ("healthy", "restarting", "unhealthy", "crashed")
+        not in (HealthStatus.HEALTHY.value, HealthStatus.RESTARTING.value, HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
     total_restarts = sum(s.get("restart_count", 0) for s in services)
 
@@ -473,6 +491,7 @@ def analytics_summary(
         24, ge=1, le=168, description="Look-back window in hours (max 168 = 7 days)"
     ),
 ):
+    """Retrieve overall crash analytics summary within a time window."""
     since = datetime.utcnow() - timedelta(hours=window_hours)
     base = get_most_unstable_services(limit=limit, window_hours=window_hours)
 
@@ -527,6 +546,7 @@ def analytics_unstable_services(
         24, ge=1, le=168, description="Look-back window in hours"
     ),
 ):
+    """Retrieve top unstable services ranked by restart frequency."""
     base = get_most_unstable_services(limit=limit, window_hours=window_hours)
 
     with Session(engine) as session:
@@ -564,6 +584,7 @@ def analytics_restart_history(
     service_name: str,
     since_hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
 ):
+    """Retrieve chronologically ordered restart events for a service."""
     since = datetime.utcnow() - timedelta(hours=since_hours)
     history = get_restart_history(service_name, since=since)
 
@@ -583,6 +604,7 @@ def analytics_restart_history(
 # ------------------------------------------------
 @router.get("/settings")
 def settings():
+    """Retrieve current orchestrator self-healing setting."""
     orch = get_orchestrator()
     return {"self_healing_enabled": orch.self_healing}
 
@@ -606,6 +628,7 @@ def analytics_failure_reasons(
         24, ge=1, le=168, description="Look-back window in hours"
     ),
 ):
+    """Retrieve count of restart events categorized by failure reason."""
     breakdown = get_failure_reasons_breakdown(
         service_name=service_name,
         window_hours=window_hours,
