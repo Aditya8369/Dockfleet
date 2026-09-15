@@ -464,6 +464,15 @@ class Orchestrator:
     def ps(self):
         print("Running containers:\n")
         self.docker.list_containers()
+    def restart(self):
+        """
+        Gracefully restart all services managed by DockFleet. This is a convenience wrapper around down() and up().
+        """
+        print("Restarting Services...\n")
+        self.down()
+        time.sleep(2)
+        self.up()
+        print("\n All services restarted.")
 
     def get_service_stats(self) -> list[ServiceStat]:
         """Enhanced Docker stats with inspect data."""

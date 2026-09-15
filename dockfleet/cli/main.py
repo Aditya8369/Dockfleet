@@ -157,6 +157,20 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
 
+@app.command()
+def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
+    """Restart all services managed by DockFleet."""
+    try:
+        config = load_config(path)
+
+        typer.echo(f"Restarting services from {path}...\n")
+
+        orch = Orchestrator(config)
+        orch.restart()
+
+    except Exception as e:
+        typer.echo(f"Error restarting services: {e}")
+        raise typer.Exit(code=1)
 
 # ------------------------------------------------
 # ps
