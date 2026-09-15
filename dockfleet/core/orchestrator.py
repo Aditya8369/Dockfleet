@@ -300,6 +300,7 @@ class Orchestrator:
 
         except Exception as e:
             logger.error("Failed to start %s: %s", name, e)
+            raise e
 
     def stop_service(self, name):
         """Stop and remove a container for the given service, marking status STOPPED."""
@@ -314,6 +315,23 @@ class Orchestrator:
 
         except Exception as e:
             logger.error("Failed to stop %s: %s", name, e)
+
+    def _mark_restart_failed(self, service_name: str, reason: str) -> None:
+        """Mark a service restart attempt as failed in DB, setting status=STOPPED and health_status=CRASHED."""
+        try:
+            with Session(engine) as session:
+                db_svc = session.exec(
+                    select(Service).where(Service.name == service_name)
+                ).one_or_none()
+                if db_svc:
+                    db_svc.status = ContainerStatus.STOPPED
+                    db_svc.health_status = HealthStatus.CRASHED
+                    db_svc.last_failure_reason = f"auto-restart failed: {reason}"
+                    session.add(db_svc)
+                    session.commit()
+                    logger.warning("Marked restart failed for %s: %s", service_name, reason)
+        except Exception as exc:
+            logger.error("Failed to update DB for failed restart %s: %s", service_name, exc)
 
     def restart_service(
         self,
@@ -409,14 +427,7 @@ class Orchestrator:
                 return True
             except Exception as e:
                 logger.error("%s restart FAILED: %s", service_name, e)
-                with Session(engine) as session:
-                    db_svc = session.exec(
-                        select(Service).where(Service.name == service_name)
-                    ).one_or_none()
-                    if db_svc and db_svc.health_status == HealthStatus.RESTARTING:
-                        db_svc.health_status = HealthStatus.CRASHED
-                        session.add(db_svc)
-                        session.commit()
+                self._mark_restart_failed(service_name, str(e))
                 return False
         except Exception as e:
             try:
