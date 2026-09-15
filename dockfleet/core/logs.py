@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import subprocess
+import threading
 
 from dockfleet.core.orchestrator import get_container_name
 from dockfleet.health.logs import store_log_line as store_log_line_in_db
@@ -17,6 +18,7 @@ async def stream_container_logs(service_name: str):
         max_retries = 20
         for attempt in range(max_retries):
             proc = None
+            stop_readers = threading.Event()
             try:
                 cmd = ["docker", "logs", "--tail", "5", "-f", container]
                 proc = subprocess.Popen(
@@ -33,9 +35,11 @@ async def stream_container_logs(service_name: str):
 
                 def enqueue_item(item):
                     """Enqueue log line into asyncio queue thread-safely."""
+                    if stop_readers.is_set():
+                        return
                     try:
                         fut = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
-                        fut.result()
+                        fut.result(timeout=1.0)
                     except Exception as e:
                         logger.debug("Failed to enqueue item for %s: %s", container, e)
 
@@ -43,7 +47,7 @@ async def stream_container_logs(service_name: str):
                     """Drain stdout stream lines and queue them."""
                     try:
                         if proc.stdout is not None:
-                            while True:
+                            while not stop_readers.is_set():
                                 line = proc.stdout.readline()
                                 if not line or not isinstance(line, str):
                                     break
@@ -60,7 +64,7 @@ async def stream_container_logs(service_name: str):
                     """Drain stderr stream lines and queue them."""
                     try:
                         if proc.stderr is not None:
-                            while True:
+                            while not stop_readers.is_set():
                                 line = proc.stderr.readline()
                                 if not line or not isinstance(line, str):
                                     break
@@ -205,6 +209,7 @@ async def stream_container_logs(service_name: str):
                     yield f"data: [dockfleet] Error streaming logs: {e}\n\n"
                     return
             finally:
+                stop_readers.set()
                 if proc is not None:
                     def cleanup():
                         """Terminate and kill subprocess safely."""
