@@ -6,6 +6,6 @@ runner = CliRunner()
 
 
 def test_cli_validate_success():
-    result = runner.invoke(app, ["examples/dockfleet.yaml"])
+    result = runner.invoke(app, ["validate", "examples/dockfleet.yaml"])
     assert result.exit_code == 0
     assert "Config valid" in result.stdout
