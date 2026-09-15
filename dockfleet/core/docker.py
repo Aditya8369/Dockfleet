@@ -2,7 +2,10 @@ import subprocess
 
 
 class DockerManager:
+    """Wrapper around Docker CLI subcommands."""
+
     def create_network(self, name: str):
+        """Create a user-defined bridge network if not already present."""
         try:
             subprocess.run(
                 ["docker", "network", "create", name],
@@ -23,7 +26,7 @@ class DockerManager:
             raise
 
     def run_container(self, image, name, flags=None, network=None):
-
+        """Run a container in detached mode with optional flags and network."""
         cmd = ["docker", "run", "-d", "--name", name]
 
         if network:
@@ -37,11 +40,9 @@ class DockerManager:
         subprocess.run(cmd, check=True)
 
     def remove_container(self, name):
-
+        """Forcefully remove a container by name."""
         result = subprocess.run(
-            ["docker", "rm", "-f", name],
-            capture_output=True,
-            text=True
+            ["docker", "rm", "-f", name], capture_output=True, text=True
         )
 
         if result.returncode != 0:
@@ -51,13 +52,9 @@ class DockerManager:
                 raise RuntimeError(result.stderr)
 
     def stop_container(self, name):
-        subprocess.run(
-            ["docker", "stop", name],
-            check=True
-        )
+        """Stop a running container by name."""
+        subprocess.run(["docker", "stop", name], check=True)
 
     def list_containers(self):
-        subprocess.run(
-            ["docker", "ps"],
-            check=True
-        )
+        """Print currently running Docker containers."""
+        subprocess.run(["docker", "ps"], check=True)
