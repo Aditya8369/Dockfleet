@@ -406,6 +406,13 @@ async def test_reader_exception_propagation(mock_popen, mock_store, caplog):
         async for event in stream_container_logs("api"):
             events.append(event)
 
-    assert len(events) >= 1
-    assert "error reading logs" in events[0].lower() or "read error" in events[0].lower()
-    assert "stdout reader" in caplog.text.lower() or "read error" in caplog.text.lower()
+    assert events == [
+        "data: [dockfleet] Error reading logs for 'dockfleet_api': Read error\n\n"
+    ]
+    assert any(
+        record.name == "dockfleet.core.logs"
+        and record.levelno == logging.ERROR
+        and record.getMessage() == "Stdout reader expected exception for dockfleet_api"
+        and record.exc_info is not None
+        for record in caplog.records
+    )
