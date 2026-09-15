@@ -546,21 +546,6 @@ class Orchestrator:
             else:
                 logger.warning("Service %s not found after restart", service_name)
 
-    def _mark_restart_failed(self, service_name: str, reason: str) -> None:
-        """Mark a service as STOPPED and CRASHED in the database after a restart failure."""
-        with Session(engine) as session:
-            svc = session.exec(
-                select(Service).where(Service.name == service_name)
-            ).one_or_none()
-            if svc:
-                # Container is not running and health is bad
-                svc.status = ContainerStatus.STOPPED
-                svc.health_status = HealthStatus.CRASHED
-                svc.last_failure_reason = f"auto-restart failed: {reason}"
-                session.add(svc)
-                session.commit()
-                logger.error("%s marked CRASHED: %s", service_name, reason)
-
     def _resolve_service_order(self):
         """Topologically sort services based on depends_on configuration."""
         visited = set()

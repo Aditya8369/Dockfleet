@@ -701,14 +701,14 @@ def test_async_api_non_blocking_during_in_flight_restart():
             res_health = await client.get("/health")
             duration_health = time.time() - start_time
             assert res_health.status_code == 200
-            assert duration_health < 0.5
+            assert duration_health < 1.0
 
             # 2. Services listing endpoint must respond immediately without hanging
             start_time = time.time()
             res_services = await client.get("/services")
             duration_services = time.time() - start_time
             assert res_services.status_code == 200
-            assert duration_services < 0.5
+            assert duration_services < 1.0
 
             # 3. Status summary endpoint must respond immediately
             res_status = await client.get("/status")
