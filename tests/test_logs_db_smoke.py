@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session
 
-from dockfleet.health.models import Service, LogEvent, engine, init_db
 from dockfleet.dashboard.routes import list_logs
+from dockfleet.health.models import LogEvent, Service, engine, init_db
 
 
 def setup_function(_func):

@@ -1,19 +1,21 @@
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 from sqlmodel import Session, select
+
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
+from dockfleet.core.orchestrator import mark_restart_failed, restart_service
 from dockfleet.health.checker import HealthChecker
 from dockfleet.health.models import Service, engine
+from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.status import (
-    update_service_health,
-    needs_restart,
     mark_restart_successful,
+    needs_restart,
     record_restart_event,
+    update_service_health,
 )
-from dockfleet.core.orchestrator import restart_service, mark_restart_failed
-
 
 DEFAULT_INTERVAL_SECONDS = 60
 
@@ -33,20 +35,49 @@ class HealthScheduler:
         config: DockFleetConfig,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
         checker: HealthChecker | None = None,
+        project_dir: Path | str | None = None,
     ) -> None:
         self.config = config
         self.interval_seconds = interval_seconds
 
         self._stopped: bool = True
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._logger = logging.getLogger(__name__)
         # allow injecting a fake checker in tests, default to real one.
         self._checker: HealthChecker = checker or HealthChecker()
 
+        # Cross-process lock to prevent duplicate schedulers for the same
+        # project.  Callers must pass ``project_dir`` explicitly to enable
+        # locking; ``None`` disables it (e.g. in tests that manage the
+        # scheduler manually or in single-pass ``--once`` mode).
+        if project_dir is not None:
+            self._lock: Optional[SchedulerLock] = SchedulerLock(
+                Path(project_dir)
+            )
+        else:
+            self._lock = None
+
     def start(self) -> None:
-        # Start the background polling thread if it's not already running.
+        """
+        Start the background polling thread.
+
+        If a ``project_dir`` was provided at construction time, an
+        exclusive cross-process lock is acquired first.  If another
+        scheduler is already running for the same project a
+        :class:`RuntimeError` is raised with an actionable message.
+
+        Raises
+        ------
+        RuntimeError
+            If the cross-process scheduler lock cannot be acquired (another
+            instance is already running for this project).
+        """
         if self._thread is not None and self._thread.is_alive():
             return
+
+        # Acquire cross-process lock (may raise RuntimeError).
+        if self._lock is not None:
+            self._lock.acquire()
 
         self._stopped = False
 
@@ -59,17 +90,38 @@ class HealthScheduler:
         self._logger.info("HealthScheduler: started background thread")
 
     def stop(self) -> None:
-        # Signal the polling thread to stop and wait for it to finish.
+        """
+        Signal the polling thread to stop, wait for it to finish, and
+        release the cross-process scheduler lock.
+
+        The lock is released only after confirming the thread has exited
+        to prevent a new scheduler from starting while the old one is
+        still running.
+        """
         self._stopped = True
 
         if self._thread is not None and self._thread.is_alive():
             self._logger.info("HealthScheduler: stopping background thread")
             # Wait for the thread to finish its current loop
             self._thread.join(timeout=self.interval_seconds + 5)
+
+            if self._thread.is_alive():
+                # Thread still alive after join timeout — do NOT release the
+                # lock; doing so would let a new scheduler start while this
+                # one is still running, recreating the duplicate-work race.
+                self._logger.warning(
+                    "HealthScheduler: thread did not exit within timeout; "
+                    "keeping lock to avoid duplicate schedulers"
+                )
+                return
+
             self._logger.info("HealthScheduler: thread stopped")
 
-        # Reset thread handle so a fresh start() can create a new one
+        # Thread is gone (or was never started) — safe to release.
         self._thread = None
+
+        if self._lock is not None and self._lock.is_held:
+            self._lock.release()
 
     def _poll(self) -> None:
         """
@@ -86,7 +138,7 @@ class HealthScheduler:
             self._logger.info("HealthScheduler: polling services...")
 
             for name, svc_cfg in self.config.services.items():
-                hc: Optional[HealthCheckConfig] = svc_cfg.healthcheck
+                hc: HealthCheckConfig | None = svc_cfg.healthcheck
 
                 # Skip services without healthcheck
                 if hc is None:
@@ -95,9 +147,7 @@ class HealthScheduler:
                 try:
                     ok = self._run_single_check(name, hc)
                     status_str = "HEALTHY" if ok else "UNHEALTHY"
-                    self._logger.info(
-                        "HealthScheduler: %s -> %s", name, status_str
-                    )
+                    self._logger.info("HealthScheduler: %s -> %s", name, status_str)
 
                     update_service_health(
                         name,
@@ -182,12 +232,10 @@ class HealthScheduler:
             success = restart_service(svc.name, self.config)
 
             if not success:
-                # Orchestrator refused / could not restart (e.g. container not running)
-                self._logger.error(
-                    "HealthScheduler: restart_service returned False for %s",
+                self._logger.info(
+                    "HealthScheduler: restart_service skipped or already in progress for %s",
                     svc.name,
                 )
-                mark_restart_failed(svc.name, "restart_service returned False")
                 return
 
             # On success: reset streak, mark running+healthy, and record event.
@@ -234,7 +282,7 @@ class HealthScheduler:
         )
         return False
 
-    def _split_host_port(self, endpoint: str) -> tuple[Optional[str], Optional[int]]:
+    def _split_host_port(self, endpoint: str) -> tuple[str | None, int | None]:
         # Helper to split 'host:port' strings safely.
         if ":" not in endpoint:
             return None, None

@@ -1,17 +1,15 @@
-
-
-import pytest
 from datetime import datetime, timedelta
-from sqlmodel import Session, SQLModel, create_engine
 from unittest.mock import patch
 
-from dockfleet.health.models import Service, RestartEvent
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
+
+from dockfleet.health.models import ContainerStatus, HealthStatus, RestartEvent, Service
 from dockfleet.health.queries import (
     get_failure_reasons_breakdown,
     get_most_unstable_services,
     get_restart_history,
 )
-
 
 # ------------------------------------------------
 # In-memory SQLite engine for tests (no file left behind)
@@ -45,7 +43,8 @@ def seeded_service_fixture(session, engine):
         name="api",
         image="nginx:latest",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=7,
     )
     session.add(svc)
@@ -100,6 +99,7 @@ def seeded_service_fixture(session, engine):
 # Tests: failure reason grouping
 # ------------------------------------------------
 
+
 def test_failure_reasons_breakdown_counts(seeded_service, engine):
     """
     get_failure_reasons_breakdown() should return correct counts
@@ -109,7 +109,7 @@ def test_failure_reasons_breakdown_counts(seeded_service, engine):
     with patch("dockfleet.health.queries.engine", engine):
         breakdown = get_failure_reasons_breakdown("api", window_hours=24)
 
-    assert breakdown["3_failed_health_checks"] == 4
+    assert breakdown["healthcheck_timeout"] == 4
     assert breakdown["manual_restart"] == 2
     # crash_loop is outside 24h window — must not appear
     assert "crash_loop" not in breakdown
@@ -126,7 +126,9 @@ def test_failure_reasons_breakdown_empty_for_unknown_service(engine):
     assert breakdown == {}
 
 
-def test_failure_reasons_breakdown_wider_window_includes_old_events(seeded_service, engine):
+def test_failure_reasons_breakdown_wider_window_includes_old_events(
+    seeded_service, engine
+):
     """
     With a 48h window, the crash_loop event (30h ago) should now appear.
     """
@@ -134,12 +136,13 @@ def test_failure_reasons_breakdown_wider_window_includes_old_events(seeded_servi
         breakdown = get_failure_reasons_breakdown("api", window_hours=48)
 
     assert breakdown["crash_loop"] == 1
-    assert breakdown["3_failed_health_checks"] == 4
+    assert breakdown["healthcheck_timeout"] == 4
 
 
 # ------------------------------------------------
 # Tests: most unstable services
 # ------------------------------------------------
+
 
 def test_most_unstable_services_ordering(seeded_service, engine):
     """
@@ -169,6 +172,7 @@ def test_most_unstable_services_empty_when_no_events(engine):
 # ------------------------------------------------
 # Tests: restart history
 # ------------------------------------------------
+
 
 def test_restart_history_returns_events_in_window(seeded_service, engine):
     """

@@ -1,14 +1,21 @@
 import json
+
 from sqlmodel import Session, select
-from .models import Service
+
 from dockfleet.cli.config import (
     DockFleetConfig,
-    ServiceConfig,
     HealthCheckConfig,
-    RestartPolicy,
 )
 
+from .models import ContainerStatus, HealthStatus, Service
+
+
 def services_from_config(config: DockFleetConfig) -> list[Service]:
+    """
+    Parse a DockFleetConfig object and generate uncommitted Service database models.
+
+    Initializes runtime defaults: ContainerStatus.STOPPED and HealthStatus.HEALTHY.
+    """
     services: list[Service] = []
 
     # 1) config.services: Dict[str, ServiceConfig]
@@ -57,8 +64,8 @@ def services_from_config(config: DockFleetConfig) -> list[Service]:
             depends_on_raw = ",".join(svc_cfg.depends_on)
 
         # 7) Runtime defaults (not from config)
-        status = "stopped"
-        health_status = "healthy"  # lifecycle is stopped, but not crashed
+        status = ContainerStatus.STOPPED
+        health_status = HealthStatus.HEALTHY  # lifecycle is stopped, but not crashed
         restart_count = 0
         last_health_check = None
         last_failure_reason = None
@@ -87,7 +94,11 @@ def services_from_config(config: DockFleetConfig) -> list[Service]:
 
     return services
 
+
 def seed_services(config: DockFleetConfig, session: Session) -> None:
+    """
+    Seed services from config into the database session if not already existing.
+    """
     services = services_from_config(config)
 
     for svc in services:

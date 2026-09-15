@@ -1,12 +1,13 @@
-import pytest
-from sqlmodel import Session, select
 from sqlalchemy import text
-from dockfleet.health.models import Service, init_db, engine
+from sqlmodel import Session, select
+
+from dockfleet.health.models import ContainerStatus, HealthStatus, Service, engine, init_db
 from dockfleet.health.status import (
-    update_service_health,
-    needs_restart,
     mark_restart_successful,
+    needs_restart,
+    update_service_health,
 )
+
 
 def _create_service(
     name: str = "api",
@@ -16,18 +17,18 @@ def _create_service(
         name=name,
         image="dummy-image",
         restart_policy=restart_policy,
-        status="running",
+        status=ContainerStatus.RUNNING,
     )
     with Session(engine) as session:
         session.add(svc)
         session.commit()
     return svc
 
+
 def _get_service(name: str) -> Service:
     with Session(engine) as session:
-        return session.exec(
-            select(Service).where(Service.name == name)
-        ).one()
+        return session.exec(select(Service).where(Service.name == name)).one()
+
 
 def setup_function() -> None:
     """
@@ -40,6 +41,7 @@ def setup_function() -> None:
         session.exec(text("DELETE FROM service"))
         session.commit()
 
+
 def test_needs_restart_after_three_failures_with_always_policy() -> None:
     _create_service(name="svc1", restart_policy="always")
 
@@ -51,8 +53,9 @@ def test_needs_restart_after_three_failures_with_always_policy() -> None:
     svc = _get_service("svc1")
 
     assert svc.consecutive_failures == 3
-    assert svc.status == "unhealthy"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is True
+
 
 def test_needs_restart_after_three_failures_with_on_failure_policy() -> None:
     _create_service(name="svc2", restart_policy="on-failure")
@@ -64,8 +67,9 @@ def test_needs_restart_after_three_failures_with_on_failure_policy() -> None:
     svc = _get_service("svc2")
 
     assert svc.consecutive_failures == 3
-    assert svc.status == "unhealthy"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is True
+
 
 def test_needs_restart_false_before_threshold() -> None:
     _create_service(name="svc3", restart_policy="always")
@@ -77,8 +81,9 @@ def test_needs_restart_false_before_threshold() -> None:
     svc = _get_service("svc3")
 
     assert svc.consecutive_failures == 2
-    assert svc.status == "unhealthy"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is False
+
 
 def test_needs_restart_respects_never_policy() -> None:
     _create_service(name="svc4", restart_policy="never")
@@ -91,8 +96,9 @@ def test_needs_restart_respects_never_policy() -> None:
     svc = _get_service("svc4")
 
     assert svc.consecutive_failures == 3
-    assert svc.status == "unhealthy"
+    assert svc.health_status == HealthStatus.CRASHED
     assert needs_restart(svc) is False
+
 
 def test_consecutive_failures_reset_after_successful_restart() -> None:
     _create_service(name="svc5", restart_policy="always")
@@ -111,5 +117,5 @@ def test_consecutive_failures_reset_after_successful_restart() -> None:
 
     svc_after = _get_service("svc5")
     assert svc_after.consecutive_failures == 0
-    assert svc_after.status == "running"
+    assert svc_after.status == ContainerStatus.RUNNING
     assert needs_restart(svc_after) is False

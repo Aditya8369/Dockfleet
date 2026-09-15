@@ -11,6 +11,7 @@ def test_cli_validate_success():
     assert result.exit_code == 0
     assert "Config valid" in result.stdout
 
+
 @patch("dockfleet.cli.main.Orchestrator.restart")
 def test_cli_restart(mock_restart):
     """Test that the restart command executes successfully without crashing."""
@@ -18,6 +19,7 @@ def test_cli_restart(mock_restart):
     assert result.exit_code == 0
     assert "Restarting services from" in result.stdout
     mock_restart.assert_called_once()
+
 
 @patch("dockfleet.cli.main.Orchestrator.restart")
 def test_cli_restart_failure(mock_restart):

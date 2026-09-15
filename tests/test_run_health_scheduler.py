@@ -1,7 +1,7 @@
 import logging
 import time
 
-from dockfleet.cli.config import load_config, DockFleetConfig
+from dockfleet.cli.config import DockFleetConfig, load_config
 from dockfleet.health.scheduler import HealthScheduler
 
 
@@ -32,5 +32,5 @@ def test_manual_health_scheduler_run():
     scheduler.stop()
 
 
-# pytest tests/test_run_health_scheduler.py -s 
+# pytest tests/test_run_health_scheduler.py -s
 # use this for running it

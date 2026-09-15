@@ -1,16 +1,21 @@
 from sqlmodel import Session, select
-from dockfleet.health.models import init_db, Service, engine
+
+from dockfleet.cli.config import DockFleetConfig, load_config
+from dockfleet.health.models import Service, engine, init_db
 from dockfleet.health.services import seed_services
 from dockfleet.health.status import update_service_health
-from dockfleet.cli.config import load_config, DockFleetConfig
 
 
 def test_consecutive_failures_and_status_transitions(tmp_path):
     """
     sanity check on update_service_health:
-    Cycle 1: healthy  -> status='running',  consecutive_failures=0, restart_count unchanged
-    Cycle 2: unhealthy -> status='unhealthy', consecutive_failures=1, restart_count +1
-    Cycle 3: unhealthy -> status='unhealthy', consecutive_failures=2, restart_count +2
+    Cycle 1: healthy   -> status='running', health_status='healthy', consecutive_failures=0, restart_count unchanged
+    Cycle 2: unhealthy -> status stays 'running', health_status='crashed', consecutive_failures=1, restart_count unchanged
+    Cycle 3: unhealthy -> status stays 'running', health_status='crashed', consecutive_failures=2, restart_count unchanged
+
+    restart_count only increments on an actual restart (handled elsewhere,
+    e.g. by the orchestrator/health scheduler after the failure threshold
+    is hit), not on every individual failed health check.
     """
     # 1) Fresh DB schema
     init_db()
@@ -45,15 +50,17 @@ def test_consecutive_failures_and_status_transitions(tmp_path):
     # Cycle 2: unhealthy
     update_service_health(service_name, is_healthy=False, reason="fail 1")
     svc = get_service()
-    assert svc.status == "unhealthy"
+    assert svc.status == "running"
+    assert svc.health_status == "crashed"
     assert svc.consecutive_failures == 1
-    assert svc.restart_count == baseline_restart_count + 1
+    assert svc.restart_count == baseline_restart_count
     assert svc.last_failure_reason == "fail 1"
 
     # Cycle 3: unhealthy again
     update_service_health(service_name, is_healthy=False, reason="fail 2")
     svc = get_service()
-    assert svc.status == "unhealthy"
+    assert svc.status == "running"
+    assert svc.health_status == "crashed"
     assert svc.consecutive_failures == 2
-    assert svc.restart_count == baseline_restart_count + 2
+    assert svc.restart_count == baseline_restart_count
     assert svc.last_failure_reason == "fail 2"

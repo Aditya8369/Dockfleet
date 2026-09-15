@@ -1,10 +1,17 @@
-import subprocess
 import json
+import subprocess
+
 from sqlmodel import Session, select
-from dockfleet.health.models import Service as DBService, engine
+
+from dockfleet.health.models import ContainerStatus, HealthStatus
+from dockfleet.health.models import Service as DBService
+from dockfleet.health.models import engine
 
 
-def get_services():
+def get_services() -> list[dict]:
+    """
+    Fetch all services from database merged with real-time Docker runtime container and resource stats.
+    """
     services = {}
 
     # -------------------
@@ -14,16 +21,19 @@ def get_services():
         db_services = session.exec(select(DBService)).all()
 
         for svc in db_services:
+            health_st = getattr(svc, "health_status", HealthStatus.HEALTHY)
+            if isinstance(health_st, HealthStatus):
+                health_st = health_st.value
+
             services[svc.name] = {
                 "name": svc.name,
-                "status": "stopped",  # default → will override
-                "health_status": getattr(svc, "health_status", "unknown"),
+                "status": ContainerStatus.STOPPED.value,  # default → will override
+                "health_status": health_st,
                 "image": svc.image,
                 "ports": svc.ports_raw,
                 "restart_policy": svc.restart_policy,
                 "restart_count": svc.restart_count,
                 "last_health_check": getattr(svc, "last_health_check", None),
-
                 # runtime
                 "cpu": "0%",
                 "memory": "0MB",
@@ -39,7 +49,7 @@ def get_services():
         result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{json .}}"],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         for line in result.stdout.splitlines():
@@ -63,27 +73,26 @@ def get_services():
             # Normalize status
             # -------------------
             if "Up" in status_raw:
-                status = "running"
+                status = ContainerStatus.RUNNING.value
             elif "Restarting" in status_raw:
-                status = "restarting"
+                status = HealthStatus.RESTARTING.value
             elif "Exited" in status_raw:
-                status = "stopped"
+                status = ContainerStatus.STOPPED.value
             else:
-                status = "unknown"
+                status = ContainerStatus.UNKNOWN.value
 
             services[service_name]["status"] = status
             services[service_name]["uptime"] = container.get("RunningFor")
 
             # sync health_status with real state, but preserve "crashed"
-            if status == "running":
-                services[service_name]["health_status"] = "healthy"
-            elif status == "restarting":
-                services[service_name]["health_status"] = "restarting"
-            elif status == "stopped":
+            if status == ContainerStatus.RUNNING.value:
+                services[service_name]["health_status"] = HealthStatus.HEALTHY.value
+            elif status == HealthStatus.RESTARTING.value:
+                services[service_name]["health_status"] = HealthStatus.RESTARTING.value
+            elif status == ContainerStatus.STOPPED.value:
                 # only downgrade to "stopped" if we don't already know it's crashed
-                if services[service_name]["health_status"] not in ("crashed",):
-                    services[service_name]["health_status"] = "stopped"
-
+                if services[service_name]["health_status"] not in (HealthStatus.CRASHED.value, HealthStatus.CRASHED):
+                    services[service_name]["health_status"] = ContainerStatus.STOPPED.value
 
     except Exception as e:
         print("Docker ps -a failed:", e)
@@ -95,7 +104,7 @@ def get_services():
         result = subprocess.run(
             ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         for line in result.stdout.strip().split("\n"):
@@ -118,4 +127,3 @@ def get_services():
         print("Docker stats failed:", e)
 
     return list(services.values())
-    
