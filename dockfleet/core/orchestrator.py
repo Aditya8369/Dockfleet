@@ -311,8 +311,19 @@ class Orchestrator:
         container_name = self.container_name(name)
 
         try:
-            self.docker.stop_container(container_name)
-            self.docker.remove_container(container_name)
+            # Best-effort stop (ignore absent container errors)
+            try:
+                self.docker.stop_container(container_name)
+            except Exception as e:
+                if "No such" not in str(e) and "not found" not in str(e).lower():
+                    raise e
+            
+            # Best-effort remove
+            try:
+                self.docker.remove_container(container_name)
+            except Exception as e:
+                if "No such" not in str(e) and "not found" not in str(e).lower():
+                    raise e
 
             mark_service_stopped(name)
             logger.info("Stopped service: %s", name)

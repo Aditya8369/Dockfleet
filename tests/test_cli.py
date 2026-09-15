@@ -29,3 +29,19 @@ def test_cli_restart_failure(mock_restart):
     assert result.exit_code == 1
     assert "Error restarting services" in result.stdout
 
+@patch("dockfleet.core.orchestrator.mark_service_stopped")
+@patch("dockfleet.core.docker.DockerManager.remove_container")
+@patch("dockfleet.core.docker.DockerManager.stop_container")
+@patch("dockfleet.core.orchestrator.Orchestrator.up")
+def test_cli_restart_absent_container(mock_up, mock_stop, mock_remove, mock_mark):
+    """Regression test: restart proceeds when the configured container does not exist."""
+    # Simulate Docker throwing a "No such container" error during down()
+    mock_stop.side_effect = Exception("Error: No such container: dockfleet_api")
+    
+    # Run the restart command
+    result = runner.invoke(app, ["restart", "examples/dockfleet.yaml"])
+    
+    # Ensure it didn't crash and successfully reached up()
+    assert result.exit_code == 0
+    mock_up.assert_called_once()
+
