@@ -46,4 +46,4 @@ services:
     healthcheck:
       type: http
       endpoint: "http://localhost:9999/health"  # nothing listening here
-      interval: 60
+      interval: 5

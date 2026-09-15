@@ -5,7 +5,13 @@ from dockfleet.cli.config import (
     HealthCheckConfig,
     load_config,
 )
-from dockfleet.health.models import Service, engine, init_db
+from dockfleet.health.models import (
+    ContainerStatus,
+    HealthStatus,
+    Service,
+    engine,
+    init_db,
+)
 from dockfleet.health.scheduler import HealthScheduler
 from dockfleet.health.services import seed_services
 from dockfleet.health.status import update_service_health
@@ -87,18 +93,21 @@ def test_scheduler_uses_injected_checker_and_db_updates(tmp_path):
     ok1 = scheduler._run_single_check(service_name, hc)
     update_service_health(service_name, ok1, reason=None)
     svc = get_service()
-    assert svc.status == "running"
+    assert svc.status == ContainerStatus.RUNNING
+    assert svc.health_status == HealthStatus.HEALTHY
 
-    # Tick 2: unhealthy
+    # Tick 2: unhealthy check -> status stays running, health_status becomes crashed
     ok2 = scheduler._run_single_check(service_name, hc)
     update_service_health(service_name, ok2, reason="fail 1")
     svc = get_service()
-    assert svc.status == "unhealthy"
+    assert svc.status == ContainerStatus.RUNNING
+    assert svc.health_status == HealthStatus.CRASHED
     assert svc.consecutive_failures == 1
 
-    # Tick 3: unhealthy
+    # Tick 3: unhealthy check
     ok3 = scheduler._run_single_check(service_name, hc)
     update_service_health(service_name, ok3, reason="fail 2")
     svc = get_service()
-    assert svc.status == "unhealthy"
+    assert svc.status == ContainerStatus.RUNNING
+    assert svc.health_status == HealthStatus.CRASHED
     assert svc.consecutive_failures == 2

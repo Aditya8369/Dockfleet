@@ -3,7 +3,13 @@ from sqlmodel import Session, select
 
 from dockfleet.cli.config import DockFleetConfig, RestartPolicy, ServiceConfig
 from dockfleet.core.orchestrator import Orchestrator
-from dockfleet.health.models import Service, engine, init_db
+from dockfleet.health.models import (
+    ContainerStatus,
+    HealthStatus,
+    Service,
+    engine,
+    init_db,
+)
 from dockfleet.health.status import needs_restart, update_service_health
 
 
@@ -21,9 +27,11 @@ def _get_service(name: str) -> Service:
         return session.exec(select(Service).where(Service.name == name)).one()
 
 
+from unittest.mock import MagicMock, patch
+
+
 def test_restart_service_happy_path():
     """Test orchestrator restart path."""
-    # Real config with service
     config = DockFleetConfig(
         services={
             "svc-orch": ServiceConfig(
@@ -32,38 +40,35 @@ def test_restart_service_happy_path():
         }
     )
 
-    orch = Orchestrator(config)  # Instance
+    orch = Orchestrator(config)
 
-    # Create DB service
     with Session(engine) as session:
         svc = Service(name="svc-orch", image="nginx:alpine", restart_policy="always")
         session.add(svc)
         session.commit()
 
-    # Simulate failures
     update_service_health("svc-orch", False, "fail 1")
     update_service_health("svc-orch", False, "fail 2")
     update_service_health("svc-orch", False, "fail 3")
 
     assert needs_restart(_get_service("svc-orch"))
 
-    # Call INSTANCE method
-    orch.restart_service("svc-orch", config)
+    with patch("subprocess.run") as mock_run, patch.object(orch, "start_service"):
+        mock_run.return_value = MagicMock(returncode=0)
+        orch.restart_service("svc-orch", config)
 
-    # Verify DB restart_count incremented
     svc = _get_service("svc-orch")
     assert svc.restart_count >= 1
 
 
 def test_restart_failure_marks_crashed():
-    """Test failure handling."""
-    # CREATE DB SERVICE FIRST (missing step!)
+    """Test failure handling when restart start_service raises an exception."""
     with Session(engine) as session:
         svc = Service(
             name="svc-fail",
             image="fail-image",
             restart_policy="always",
-            status="running",
+            status=ContainerStatus.RUNNING,
         )
         session.add(svc)
         session.commit()
@@ -75,15 +80,17 @@ def test_restart_failure_marks_crashed():
     )
     orch = Orchestrator(config)
 
-    # Simulate 3 failures → triggers restart
     update_service_health("svc-fail", False, "fail 1")
     update_service_health("svc-fail", False, "fail 2")
     update_service_health("svc-fail", False, "fail 3")
 
-    # This will FAIL restart → trigger _mark_restart_failed()
-    orch.handle_unhealthy_service("svc-fail", config, "test failure")
+    with patch("subprocess.run") as mock_run, patch.object(
+        orch, "start_service", side_effect=RuntimeError("Docker engine down")
+    ):
+        mock_run.return_value = MagicMock(returncode=0)
+        orch.handle_unhealthy_service("svc-fail", config, "test failure")
 
-    # ✅ Now service exists + marked crashed
     svc = _get_service("svc-fail")
-    assert svc.status == "crashed"
+    assert svc.status == ContainerStatus.STOPPED
+    assert svc.health_status == HealthStatus.CRASHED
     assert "auto-restart failed" in (svc.last_failure_reason or "")

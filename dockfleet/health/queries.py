@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlmodel import Session, func, select
@@ -162,7 +162,7 @@ def get_most_unstable_services(
         {"service_name": "worker", "restarts": 1},
       ]
     """
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
     with Session(engine) as session:
         stmt = (
@@ -212,7 +212,7 @@ def get_failure_reasons_breakdown(
     Aggregate restart reasons (grouped into categories) for a service
     in the last `window_hours`.
     """
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
     with Session(engine) as session:
         svc = session.exec(

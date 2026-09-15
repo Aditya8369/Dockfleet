@@ -33,6 +33,7 @@ _health_scheduler: HealthScheduler | None = None
 
 
 def _get_default_config_path() -> Path:
+    """Return default YAML configuration path."""
     return Path("examples/dockfleet.yaml")
 
 
@@ -41,6 +42,7 @@ def _get_default_config_path() -> Path:
 # ------------------------------------------------
 @app.on_event("startup")
 def on_startup() -> None:
+    """Initialize database and bootstrap services on FastAPI application startup."""
     global _health_scheduler
 
     init_db()

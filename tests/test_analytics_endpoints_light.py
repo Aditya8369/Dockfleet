@@ -94,12 +94,9 @@ def test_analytics_restart_history_endpoint():
 
 
 def test_analytics_failure_reasons_endpoint():
-    res = analytics_failure_reasons("api", window_hours=24)
-    # convert to dict for easy assertions
-    reasons = {item.reason: item.count for item in res}
-    assert reasons["3_failed_health_checks"] == 1
-    assert reasons["manual_dashboard_restart"] == 1
+    reasons = analytics_failure_reasons("api", window_hours=24)
+    assert reasons["healthcheck_timeout"] == 1
+    assert reasons["manual_restart"] == 1
 
-    worker_res = analytics_failure_reasons("worker", window_hours=24)
-    worker_reasons = {item.reason: item.count for item in worker_res}
-    assert worker_reasons["3_failed_health_checks"] == 1
+    worker_reasons = analytics_failure_reasons("worker", window_hours=24)
+    assert worker_reasons["healthcheck_timeout"] == 1

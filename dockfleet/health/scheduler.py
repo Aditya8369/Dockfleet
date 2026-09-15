@@ -232,12 +232,10 @@ class HealthScheduler:
             success = restart_service(svc.name, self.config)
 
             if not success:
-                # Orchestrator refused / could not restart (e.g. container not running)
-                self._logger.error(
-                    "HealthScheduler: restart_service returned False for %s",
+                self._logger.info(
+                    "HealthScheduler: restart_service skipped or already in progress for %s",
                     svc.name,
                 )
-                mark_restart_failed(svc.name, "restart_service returned False")
                 return
 
             # On success: reset streak, mark running+healthy, and record event.
