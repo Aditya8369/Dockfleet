@@ -248,7 +248,12 @@ class Orchestrator:
         return f"dockfleet_{service}"
 
     def start_service(self, name, svc):
-        """Start a container for the given service definition and update database status."""
+        """
+        Start a container for the given service definition and update database status.
+
+        Raises:
+            Exception: If container execution fails (e.g., Docker daemon error, non-zero run exit status).
+        """
         container_name = self.container_name(name)
 
         try:
