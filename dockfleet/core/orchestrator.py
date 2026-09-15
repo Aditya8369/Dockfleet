@@ -147,7 +147,8 @@ class Orchestrator:
     def container_name(self, service: str) -> str:
         return f"dockfleet_{service}"
 
-    def start_service(self, name, svc):
+    def start_service(self, name, svc) -> bool:
+        """Start a single service container with configured flags and network."""
         container_name = self.container_name(name)
 
         try:
@@ -205,11 +206,14 @@ class Orchestrator:
 
             mark_service_running(name)
             logger.info("Started service: %s", name)
+            return True
 
         except Exception as e:
             logger.error("Failed to start %s: %s", name, e)
+            return False
 
-    def stop_service(self, name):
+    def stop_service(self, name) -> bool:
+        """Stop and remove a service container."""
         container_name = self.container_name(name)
 
         try:
@@ -218,9 +222,11 @@ class Orchestrator:
 
             mark_service_stopped(name)
             logger.info("Stopped service: %s", name)
+            return True
 
         except Exception as e:
             logger.error("Failed to stop %s: %s", name, e)
+            return False
 
     def restart_service(
         self,
@@ -432,7 +438,7 @@ class Orchestrator:
 
     def up(self):
         """
-        Start all services once and return.
+        Start all services once and return. Raises an exception if any services fail to start.
 
         Continuous monitoring and self-healing are handled by HealthScheduler;
         this method should not block.
@@ -448,19 +454,30 @@ class Orchestrator:
 
         # Start services in dependency order
         order = self._resolve_service_order()
+        failed = []
 
         for name in order:
             svc = self.config.services[name]
-            self.start_service(name, svc)
+            success = self.start_service(name, svc)
+            if not success:
+                failed.append(name)
+
+        if failed:
+            raise RuntimeError(f"Failed to start services: {failed}")
 
         print("All services started.")
 
     def down(self):
+        """Stop and remove all services. Raises an exception if any service fails to stop."""
         print("Stopping services...\n")
+        failed = []
 
         for name in self.config.services.keys():
-            self.stop_service(name)
-
+            success = self.stop_service(name)
+            if not success:
+                failed.append(name)
+        if failed:
+            raise RuntimeError(f"Failed to stop services: {failed}")
     def ps(self):
         print("Running containers:\n")
         self.docker.list_containers()
@@ -574,3 +591,4 @@ class Orchestrator:
             )
             for name in self.config.services.keys()
         ]
+    

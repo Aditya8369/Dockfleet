@@ -156,7 +156,9 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
-
+# ------------------------------------------------
+# restart
+# ------------------------------------------------
 @app.command()
 def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Restart all services managed by DockFleet."""
