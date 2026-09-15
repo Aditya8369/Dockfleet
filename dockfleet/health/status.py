@@ -1,40 +1,69 @@
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+
 from sqlmodel import Session, select
-from .models import Service, RestartEvent, engine
+
+from .models import ContainerStatus, HealthStatus, RestartEvent, Service, engine
+
 
 def mark_service_running(name: str) -> None:
-    _update_status(name, new_status="running", new_health="healthy", set_last_health=True)
+    """
+    Mark a service as actively running and healthy in the database.
+
+    Sets container lifecycle status to RUNNING and health_status to HEALTHY,
+    recording the current UTC timestamp in last_health_check.
+    """
+    _update_status(
+        name,
+        new_status=ContainerStatus.RUNNING,
+        new_health=HealthStatus.HEALTHY,
+        set_last_health=True,
+    )
 
 
 def mark_service_stopped(name: str) -> None:
-    # Normal stop: container stopped but still considered healthy
-    _update_status(name, new_status="stopped", new_health="healthy", set_last_health=False)
+    """
+    Mark a service as cleanly stopped in the database.
+
+    Sets container lifecycle status to STOPPED while preserving healthy status
+    (normal intentional stop).
+    """
+    _update_status(
+        name,
+        new_status=ContainerStatus.STOPPED,
+        new_health=HealthStatus.HEALTHY,
+        set_last_health=False,
+    )
 
 
 def _update_status(
     name: str,
-    new_status: str,
-    new_health: Optional[str] = None,
+    new_status: ContainerStatus | str,
+    new_health: HealthStatus | str | None = None,
     set_last_health: bool = False,
 ) -> None:
     """Low-level helper to flip status (and optionally health_status) for a service by name."""
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == name)
-        ).one_or_none()
+        svc = session.exec(select(Service).where(Service.name == name)).one_or_none()
 
         if svc is None:
             print(f"[status] Service '{name}' not found in DB, skipping status update")
             return
 
-        svc.status = new_status
+        svc.status = (
+            ContainerStatus(new_status)
+            if isinstance(new_status, str) and not isinstance(new_status, ContainerStatus)
+            else new_status
+        )
 
         if new_health is not None:
-            svc.health_status = new_health
+            svc.health_status = (
+                HealthStatus(new_health)
+                if isinstance(new_health, str) and not isinstance(new_health, HealthStatus)
+                else new_health
+            )
 
         if set_last_health:
-            svc.last_health_check = datetime.utcnow()
+            svc.last_health_check = datetime.now(timezone.utc)
 
         session.add(svc)
         session.commit()
@@ -43,39 +72,37 @@ def _update_status(
 def update_service_health(
     name: str,
     is_healthy: bool,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> None:
     """
     Update Service row after a health check.
     - If healthy:
-        status        = "running"
-        health_status = "healthy"
+        status        = ContainerStatus.RUNNING
+        health_status = HealthStatus.HEALTHY
         last_health_check updated
         consecutive_failures reset to 0
     - If unhealthy:
         status        stays as-is (running/stopped decided elsewhere)
-        health_status = "crashed"
+        health_status = HealthStatus.CRASHED
         last_health_check updated
         consecutive_failures++
     """
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == name)
-        ).one_or_none()
+        svc = session.exec(select(Service).where(Service.name == name)).one_or_none()
 
         if svc is None:
             print(f"[health] Service '{name}' not found in DB")
             return
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         svc.last_health_check = now
 
         if is_healthy:
-            svc.status = "running"
-            svc.health_status = "healthy"
+            svc.status = ContainerStatus.RUNNING
+            svc.health_status = HealthStatus.HEALTHY
             svc.consecutive_failures = 0
         else:
-            svc.health_status = "crashed"
+            svc.health_status = HealthStatus.CRASHED
             svc.consecutive_failures += 1
             if reason:
                 svc.last_failure_reason = reason
@@ -91,7 +118,7 @@ def needs_restart(service: Service) -> bool:
     - At least 3 consecutive health check failures.
     - restart_policy must be "always" or "on-failure".
     - restart_policy == "never" is a hard block.
-    - Only restart if currently unhealthy/crashed.
+    - Only restart if currently unhealthy or crashed.
     """
     if service.consecutive_failures < 3:
         return False
@@ -99,7 +126,7 @@ def needs_restart(service: Service) -> bool:
     if service.restart_policy not in {"always", "on-failure"}:
         return False
 
-    if service.health_status not in {"unhealthy", "crashed"}:
+    if service.health_status not in {HealthStatus.UNHEALTHY, HealthStatus.CRASHED}:
         return False
 
     return True
@@ -113,10 +140,10 @@ def record_restart_event(service: Service, reason: str) -> None:
     event = RestartEvent(
         service_id=service.id,
         service_name=service.name,
-        restarted_at=datetime.utcnow(),
+        restarted_at=datetime.now(timezone.utc),
         reason=reason,
-        previous_status=service.status,
-        new_status="running",  # intended post-restart status
+        previous_status=service.status.value if isinstance(service.status, ContainerStatus) else service.status,
+        new_status=ContainerStatus.RUNNING.value,  # intended post-restart status
     )
 
     with Session(engine) as session:
@@ -139,8 +166,8 @@ def mark_restart_successful(service_name: str) -> None:
             return
 
         svc.consecutive_failures = 0
-        svc.status = "running"
-        svc.health_status = "healthy"
+        svc.status = ContainerStatus.RUNNING
+        svc.health_status = HealthStatus.HEALTHY
 
         session.add(svc)
         session.commit()
@@ -152,7 +179,7 @@ def record_manual_restart_event(service_name: str) -> None:
     and the orchestrator has successfully restarted the container.
 
     - Increments restart_count (restart attempts).
-    - Marks status as 'running' and health_status as 'healthy'.
+    - Marks status as ContainerStatus.RUNNING and health_status as HealthStatus.HEALTHY.
     - Inserts a RestartEvent with reason='manual_dashboard_restart'.
     """
     with Session(engine) as session:
@@ -164,18 +191,18 @@ def record_manual_restart_event(service_name: str) -> None:
             print(f"[manual-restart] Service '{service_name}' not found in DB")
             return
 
-        previous_status = svc.status
+        previous_status = svc.status.value if isinstance(svc.status, ContainerStatus) else svc.status
         svc.restart_count = (svc.restart_count or 0) + 1
-        svc.status = "running"
-        svc.health_status = "healthy"
+        svc.status = ContainerStatus.RUNNING
+        svc.health_status = HealthStatus.HEALTHY
 
         event = RestartEvent(
             service_id=svc.id,
             service_name=svc.name,
-            restarted_at=datetime.utcnow(),
+            restarted_at=datetime.now(timezone.utc),
             reason="manual_dashboard_restart",
             previous_status=previous_status,
-            new_status="running",
+            new_status=ContainerStatus.RUNNING.value,
         )
 
         session.add(svc)
@@ -188,8 +215,8 @@ def record_manual_stop(service_name: str) -> None:
     Called when a manual stop is triggered from the dashboard
     and the orchestrator has successfully stopped the container.
 
-    - Marks status as 'stopped'.
-    - Keeps health_status as 'healthy' (it's a clean stop).
+    - Marks status as ContainerStatus.STOPPED.
+    - Keeps health_status as HealthStatus.HEALTHY (it's a clean stop).
     - Does NOT touch restart_count or consecutive_failures.
     """
     with Session(engine) as session:
@@ -201,8 +228,8 @@ def record_manual_stop(service_name: str) -> None:
             print(f"[manual-stop] Service '{service_name}' not found in DB")
             return
 
-        svc.status = "stopped"
-        svc.health_status = "healthy"
+        svc.status = ContainerStatus.STOPPED
+        svc.health_status = HealthStatus.HEALTHY
 
         session.add(svc)
         session.commit()

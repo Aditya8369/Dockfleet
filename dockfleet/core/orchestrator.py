@@ -1,21 +1,27 @@
 import logging
 import re
 import subprocess
+import logging
+import re
+import subprocess
+import threading
 from datetime import datetime
 from typing import Optional
+
 import time
 
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from dockfleet.cli.config import RestartPolicy
+from dockfleet.cli.config import DockFleetConfig, RestartPolicy
 from dockfleet.core.docker import DockerManager
 from dockfleet.core.docker_flags import (
     build_env_flags,
     build_port_flags,
     build_resource_flags,
 )
-from dockfleet.health.models import Service, engine
+from dockfleet.health.logs import store_log_line
+from dockfleet.health.models import ContainerStatus, HealthStatus, Service, engine
 from dockfleet.health.seed import bootstrap_from_config
 from dockfleet.health.status import (
     mark_restart_successful,
@@ -23,22 +29,28 @@ from dockfleet.health.status import (
     mark_service_stopped,
     record_restart_event,
 )
-from dockfleet.health.logs import store_log_line
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 
 class ServiceStat(BaseModel):
+    """
+    Real-time performance and container metrics for a managed service.
+    """
+
     service_name: str
     container_name: str
-    cpu_percent: Optional[float] = None
-    mem_current: Optional[str] = None
-    mem_percent: Optional[str] = None
-    uptime: Optional[str] = None
-    status: str = "unknown"  # running, stopped, missing
+    cpu_percent: float | None = None
+    mem_current: str | None = None
+    mem_percent: str | None = None
+    uptime: str | None = None
+    status: ContainerStatus | str = ContainerStatus.UNKNOWN  # running, stopped, missing
 
 
 _orchestrator_instance = None
+_orchestrator_lock = threading.Lock()
 
 
 def get_container_name(service_name: str) -> str:
@@ -52,12 +64,89 @@ def get_service_stats(config=None):
     return orch.get_service_stats()
 
 
-def get_orchestrator(config=None, self_healing: bool = True):
-    """Get/create global Orchestrator instance."""
+def get_orchestrator(config=None, self_healing=_UNSET):
+    """Return the module-level Orchestrator singleton, creating it on first call.
+
+    The singleton is created once and reused for the lifetime of the process.
+    If a subsequent call passes a *different* ``config`` or ``self_healing``
+    value, a warning is logged and the original instance is returned unchanged.
+
+    ``self_healing`` uses a sentinel default so that callers which omit the
+    argument (e.g. ``restart_service()``, ``/settings``) do not spuriously
+    trigger a mismatch warning when the singleton was created with
+    ``self_healing=False``.
+
+    Thread-safe: the entire read-or-create operation is atomic under a single
+    lock, so concurrent calls (including concurrent ``reset_orchestrator()``)
+    never observe a stale or partially-created instance.
+
+    Use :func:`reset_orchestrator` to explicitly clear the singleton (intended
+    for tests and deliberate full-reconfiguration flows, not production code).
+    """
     global _orchestrator_instance
-    if _orchestrator_instance is None:
-        _orchestrator_instance = Orchestrator(config or {}, self_healing=self_healing)
-    return _orchestrator_instance
+
+    # Resolve sentinel to the real default before any comparison or creation.
+    resolved_self_healing = True if self_healing is _UNSET else self_healing
+
+    with _orchestrator_lock:
+        if _orchestrator_instance is not None:
+            _warn_on_mismatch(_orchestrator_instance, config, self_healing)
+            return _orchestrator_instance
+
+        # Default to a proper DockFleetConfig (not a bare dict) so
+        # Orchestrator.__init__ can safely assign .services on it.
+        effective_config = config or DockFleetConfig(services={})
+        _orchestrator_instance = Orchestrator(
+            effective_config, self_healing=resolved_self_healing
+        )
+        return _orchestrator_instance
+
+
+def _warn_on_mismatch(orch, config, self_healing):
+    """Log a warning if caller-supplied args differ from the live singleton.
+
+    When ``self_healing`` is the sentinel ``_UNSET`` (caller didn't pass it),
+    the self_healing comparison is skipped entirely — only ``config`` changes
+    are reported.  This prevents spurious warnings for callers like
+    ``restart_service()`` and ``/settings`` that never pass ``self_healing``.
+    """
+    changes = []
+
+    if config is not None and config != orch.config:
+        changes.append("config")
+    if self_healing is not _UNSET and self_healing != orch.self_healing:
+        changes.append("self_healing")
+
+    if changes:
+        logger.warning(
+            "get_orchestrator() called with changed %s but orchestrator "
+            "singleton already exists — arguments ignored. Existing values: "
+            "self_healing=%s. Call reset_orchestrator() first if you need "
+            "a fresh instance.",
+            ", ".join(changes),
+            orch.self_healing,
+        )
+
+
+def reset_orchestrator():
+    """Clear the module-level Orchestrator singleton.
+
+    After this call, the next :func:`get_orchestrator` invocation will create
+    a brand-new instance with whatever arguments are passed.
+
+    Intended for test teardown and legitimate full-reconfiguration flows.
+    **Not** to be called automatically in production code paths — callers
+    should treat this as a deliberate, explicit action.
+
+    Safe to call even if no singleton has been created yet (no-op).
+
+    Thread-safe: holds ``_orchestrator_lock`` for the entire operation so
+    concurrent ``get_orchestrator()`` calls never observe a stale instance.
+    """
+    global _orchestrator_instance
+
+    with _orchestrator_lock:
+        _orchestrator_instance = None
 
 
 def restart_service(name: str, config=None) -> bool:
@@ -125,6 +214,9 @@ def get_logs(
 
 
 def normalize_services(services):
+    """
+    Normalize list of service configs into a dictionary keyed by service name.
+    """
     if isinstance(services, list):
         normalized = {}
         for svc in services:
@@ -137,17 +229,31 @@ def normalize_services(services):
 
 
 class Orchestrator:
+    """
+    Main orchestration engine managing container lifecycle, deployments, and self-healing restarts.
+    """
+
     def __init__(self, config, self_healing: bool = True):
+        """Initialize the Orchestrator with configuration and self-healing toggle."""
         self.config = config
         self.config.services = normalize_services(getattr(config, "services", {}))
         self.self_healing = self_healing
         self.docker = DockerManager()
         self.network = "dockfleet_net"
+        self._active_restarts: set[str] = set()
+        self._restart_lock = threading.Lock()
 
     def container_name(self, service: str) -> str:
+        """Return the standard Docker container name for a service."""
         return f"dockfleet_{service}"
 
     def start_service(self, name, svc):
+        """
+        Start a container for the given service definition and update database status.
+
+        Raises:
+            Exception: If container execution fails (e.g., Docker daemon error, non-zero run exit status).
+        """
         container_name = self.container_name(name)
 
         try:
@@ -170,17 +276,8 @@ class Orchestrator:
                 raise ValueError(f"Service '{name}' missing 'image'")
 
             # DEFAULTS
-            service_config["env"] = service_config.get("env") or {}
-            service_config["ports"] = service_config.get("ports") or []
 
-            # FIX env (list → dict)
-            if isinstance(service_config["env"], list):
-                env_dict = {}
-                for item in service_config["env"]:
-                    if "=" in item:
-                        k, v = item.split("=", 1)
-                        env_dict[k] = v
-                service_config["env"] = env_dict
+            service_config["ports"] = service_config.get("ports") or []
 
             # FIX ports (dict → list)
             if isinstance(service_config["ports"], dict):
@@ -208,8 +305,10 @@ class Orchestrator:
 
         except Exception as e:
             logger.error("Failed to start %s: %s", name, e)
+            raise e
 
     def stop_service(self, name):
+        """Stop and remove a container for the given service, marking status STOPPED."""
         container_name = self.container_name(name)
 
         try:
@@ -222,6 +321,23 @@ class Orchestrator:
         except Exception as e:
             logger.error("Failed to stop %s: %s", name, e)
 
+    def _mark_restart_failed(self, service_name: str, reason: str) -> None:
+        """Mark a service restart attempt as failed in DB, setting status=STOPPED and health_status=CRASHED."""
+        try:
+            with Session(engine) as session:
+                db_svc = session.exec(
+                    select(Service).where(Service.name == service_name)
+                ).one_or_none()
+                if db_svc:
+                    db_svc.status = ContainerStatus.STOPPED
+                    db_svc.health_status = HealthStatus.CRASHED
+                    db_svc.last_failure_reason = f"auto-restart failed: {reason}"
+                    session.add(db_svc)
+                    session.commit()
+                    logger.warning("Marked restart failed for %s: %s", service_name, reason)
+        except Exception as exc:
+            logger.error("Failed to update DB for failed restart %s: %s", service_name, exc)
+
     def restart_service(
         self,
         service_name: str,
@@ -231,6 +347,8 @@ class Orchestrator:
         """
         Restart a service's container, respecting restart_policy and self_healing.
 
+        - Guards against concurrent restarts for the same service.
+        - Sets DB health_status = HealthStatus.RESTARTING during execution.
         - If restart_policy == "never": do nothing and return False.
         - Otherwise:
           - Optional exponential backoff.
@@ -255,43 +373,81 @@ class Orchestrator:
             logger.info("%s: restart='never', skipping", service_name)
             return False
 
-        # Optional exponential backoff
-        if backoff_attempt > 0:
-            delay = min(2**backoff_attempt, 32)
-            logger.info(
-                "%s: backoff %ss (attempt %s)",
-                service_name,
-                delay,
-                backoff_attempt,
-            )
-            time.sleep(delay)
+        # Concurrency guard: thread check
+        with self._restart_lock:
+            if service_name in self._active_restarts:
+                logger.warning("Restart already in progress for service %s", service_name)
+                return False
+            self._active_restarts.add(service_name)
 
-        logger.info("Restarting %s", service_name)
-        container_name = self.container_name(service_name)
-
-        # Best-effort stop; even if this fails, we still try to start a new one
         try:
-            subprocess.run(
-                ["docker", "stop", container_name],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except Exception as exc:
-            logger.warning("restart_service: error stopping %s: %s", container_name, exc)
+            # Set DB health_status to RESTARTING during restart execution
+            with Session(engine) as session:
+                db_svc = session.exec(
+                    select(Service).where(Service.name == service_name)
+                ).one_or_none()
+                if db_svc:
+                    db_svc.health_status = HealthStatus.RESTARTING
+                    session.add(db_svc)
+                    session.commit()
 
-        # Try to start a fresh container
-        try:
-            self.start_service(service_name, svc)
-            self._increment_restart_count(service_name)
-            logger.info("%s restarted (count updated)", service_name)
-            return True
+            # Optional exponential backoff
+            if backoff_attempt > 0:
+                delay = min(2**backoff_attempt, 32)
+                logger.info(
+                    "%s: backoff %ss (attempt %s)",
+                    service_name,
+                    delay,
+                    backoff_attempt,
+                )
+                time.sleep(delay)
+
+            logger.info("Restarting %s", service_name)
+            container_name = self.container_name(service_name)
+
+            # Best-effort stop; even if this fails, we still try to start a new one
+            try:
+                subprocess.run(
+                    ["docker", "stop", container_name],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "restart_service: error stopping %s: %s", container_name, exc
+                )
+
+            # Try to start a fresh container
+            try:
+                self.start_service(service_name, svc)
+                self._increment_restart_count(service_name)
+                logger.info("%s restarted (count updated)", service_name)
+                return True
+            except Exception as e:
+                logger.error("%s restart FAILED: %s", service_name, e)
+                self._mark_restart_failed(service_name, str(e))
+                return False
         except Exception as e:
-            logger.error("%s restart FAILED: %s", service_name, e)
-            return False
+            try:
+                with Session(engine) as session:
+                    db_svc = session.exec(
+                        select(Service).where(Service.name == service_name)
+                    ).one_or_none()
+                    if db_svc and db_svc.health_status == HealthStatus.RESTARTING:
+                        db_svc.health_status = HealthStatus.CRASHED
+                        session.add(db_svc)
+                        session.commit()
+            except Exception:
+                pass
+            raise e
+        finally:
+            with self._restart_lock:
+                self._active_restarts.discard(service_name)
 
     def _increment_restart_count(self, service_name: str) -> None:
+        """Increment the cumulative restart count for a service in the database."""
         try:
             with Session(engine) as session:
                 svc = session.exec(
@@ -348,6 +504,9 @@ class Orchestrator:
         config=None,
         reason: str = "health failure",
     ) -> None:
+        """
+        Handle an unhealthy service by performing self-healing auto-restart and logging restart events.
+        """
         config = config or self.config
         logger.info("Auto-restart: %s (%s)", service_name, reason)
 
@@ -363,11 +522,7 @@ class Orchestrator:
             return
 
         if not success:
-            logger.error("restart_service failed %s", service_name)
-            self._mark_restart_failed(
-                service_name,
-                "restart_service returned False",
-            )
+            logger.info("restart_service skipped or already in progress for %s", service_name)
             return
 
         logger.info("%s auto-restarted", service_name)
@@ -382,21 +537,8 @@ class Orchestrator:
             else:
                 logger.warning("Service %s not found after restart", service_name)
 
-    def _mark_restart_failed(self, service_name: str, reason: str) -> None:
-        with Session(engine) as session:
-            svc = session.exec(
-                select(Service).where(Service.name == service_name)
-            ).one_or_none()
-            if svc:
-                # Container is not running and health is bad
-                svc.status = "stopped"
-                svc.health_status = "crashed"
-                svc.last_failure_reason = f"auto-restart failed: {reason}"
-                session.add(svc)
-                session.commit()
-                logger.error("%s marked CRASHED: %s", service_name, reason)
-
     def _resolve_service_order(self):
+        """Topologically sort services based on depends_on configuration."""
         visited = set()
         visiting = set()
         order = []
@@ -456,12 +598,14 @@ class Orchestrator:
         print("All services started.")
 
     def down(self):
+        """Stop and tear down all managed services."""
         print("Stopping services...\n")
 
         for name in self.config.services.keys():
             self.stop_service(name)
 
     def ps(self):
+        """Print running Docker containers managed by Dockfleet."""
         print("Running containers:\n")
         self.docker.list_containers()
 
@@ -489,9 +633,7 @@ class Orchestrator:
                 return self._get_missing_stats()
 
             lines = [
-                line
-                for line in result.stdout.strip().split("\n")[1:]
-                if line.strip()
+                line for line in result.stdout.strip().split("\n")[1:] if line.strip()
             ]
 
             for line in lines:
@@ -517,7 +659,7 @@ class Orchestrator:
                             mem_current=f"{mem_current}/{mem_limit}",
                             mem_percent=mem_perc.strip(),
                             uptime=uptime,
-                            status="running",
+                            status=ContainerStatus.RUNNING,
                         )
                     )
 
@@ -533,7 +675,7 @@ class Orchestrator:
                     ServiceStat(
                         service_name=service_name,
                         container_name=container,
-                        status="stopped",
+                        status=ContainerStatus.STOPPED,
                     )
                 )
 
@@ -543,7 +685,13 @@ class Orchestrator:
         """Get uptime from docker inspect."""
         try:
             result = subprocess.run(
-                ["docker", "inspect", container_name, "--format", "{{.State.StartedAt}}"],
+                [
+                    "docker",
+                    "inspect",
+                    container_name,
+                    "--format",
+                    "{{.State.StartedAt}}",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -561,7 +709,7 @@ class Orchestrator:
             ServiceStat(
                 service_name=name,
                 container_name=f"dockfleet_{name}",
-                status="unknown",
+                status=ContainerStatus.UNKNOWN,
             )
             for name in self.config.services.keys()
         ]

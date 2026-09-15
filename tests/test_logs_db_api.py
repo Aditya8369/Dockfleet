@@ -1,6 +1,7 @@
 from sqlmodel import Session, select
-from dockfleet.health.models import Service, LogEvent, engine, init_db
+
 from dockfleet.health.logs import store_log_line
+from dockfleet.health.models import LogEvent, Service, engine, init_db
 
 
 def setup_function(_func):
@@ -31,11 +32,7 @@ def test_store_log_and_filter_by_service():
 
     # Assert: logs present and filterable by service_name
     with Session(engine) as session:
-        rows = (
-            session.query(LogEvent)
-            .filter(LogEvent.service_name == "api")
-            .all()
-        )
+        rows = session.query(LogEvent).filter(LogEvent.service_name == "api").all()
 
     assert len(rows) >= 2
     messages = [row.message for row in rows]
@@ -45,7 +42,9 @@ def test_store_log_and_filter_by_service():
 
 def test_store_log_skips_unknown_service():
     # Act: call store_log_line with unknown service
-    store_log_line("unknown-service", "Should not be stored", level="INFO", source="test")
+    store_log_line(
+        "unknown-service", "Should not be stored", level="INFO", source="test"
+    )
 
     # Assert: no LogEvent rows for that name
     with Session(engine) as session:

@@ -1,8 +1,9 @@
 from sqlmodel import Session, select
-from dockfleet.health.models import init_db, Service, engine
+
+from dockfleet.cli.config import DockFleetConfig, load_config
+from dockfleet.health.models import Service, engine, init_db
 from dockfleet.health.services import seed_services
 from dockfleet.health.status import update_service_health
-from dockfleet.cli.config import load_config, DockFleetConfig
 
 
 def test_update_service_health_changes_db_fields(tmp_path):
@@ -27,9 +28,7 @@ def test_update_service_health_changes_db_fields(tmp_path):
     update_service_health(service_name, is_healthy=True, reason=None)
 
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == service_name)
-        ).one()
+        svc = session.exec(select(Service).where(Service.name == service_name)).one()
         assert svc.status == "running"
         assert svc.last_health_check is not None
         healthy_restart_count = svc.restart_count
@@ -45,7 +44,9 @@ def test_update_service_health_changes_db_fields(tmp_path):
         svc = session.exec(
             select(Service).where(Service.name == service_name)
         ).one()
-        assert svc.status == "unhealthy"
+
+        assert svc.status == "running"
+        assert svc.health_status == "crashed"
         assert svc.last_health_check is not None
-        assert svc.restart_count == healthy_restart_count + 1
+        assert svc.restart_count == healthy_restart_count
         assert svc.last_failure_reason == "test failure"

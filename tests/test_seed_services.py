@@ -1,8 +1,13 @@
-import pytest
-from sqlmodel import SQLModel, create_engine, Session, select
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from dockfleet.cli.config import (
+    DockFleetConfig,
+    HealthCheckConfig,
+    RestartPolicy,
+    ServiceConfig,
+)
 from dockfleet.health.models import Service
 from dockfleet.health.seed import seed_services
-from dockfleet.cli.config import DockFleetConfig, ServiceConfig, HealthCheckConfig, RestartPolicy
 
 
 def make_test_config() -> DockFleetConfig:

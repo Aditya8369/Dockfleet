@@ -8,19 +8,17 @@ we test it by mocking the restart call and verifying it is (or isn't) made
 depending on the flag value.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, call
-from datetime import datetime
+from unittest.mock import MagicMock
 
+import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from dockfleet.health.models import Service, RestartEvent
-
+from dockfleet.health.models import ContainerStatus, HealthStatus, Service
 
 # ------------------------------------------------
 # In-memory SQLite engine for tests
 # ------------------------------------------------
-TEST_DB_URL = "sqlite://"
+TEST_DB_URL = "sqlite:///:memory:"
 
 
 @pytest.fixture(name="engine")
@@ -28,7 +26,6 @@ def engine_fixture():
     engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
     yield engine
-    SQLModel.metadata.drop_all(engine)
 
 
 @pytest.fixture(name="session")
@@ -47,9 +44,10 @@ def unhealthy_service_fixture(session):
         name="api",
         image="nginx:latest",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=2,
-        consecutive_failures=3,   # at threshold — restart should trigger
+        consecutive_failures=3,  # at threshold — restart should trigger
     )
     session.add(svc)
     session.commit()
@@ -61,6 +59,7 @@ def unhealthy_service_fixture(session):
 # Helper: simulate what the scheduler does
 # when it decides whether to restart a service
 # ------------------------------------------------
+
 
 def should_restart(service: Service, self_healing_enabled: bool) -> bool:
     """
@@ -84,6 +83,7 @@ def should_restart(service: Service, self_healing_enabled: bool) -> bool:
 # Tests: self_healing toggle
 # ------------------------------------------------
 
+
 def test_restart_skipped_when_self_healing_disabled(unhealthy_service):
     """
     When self_healing=False, should_restart() must return False
@@ -91,9 +91,7 @@ def test_restart_skipped_when_self_healing_disabled(unhealthy_service):
     This is the core requirement: no auto-restart when toggle is off.
     """
     result = should_restart(unhealthy_service, self_healing_enabled=False)
-    assert result is False, (
-        "Auto-restart must be skipped when self_healing is disabled"
-    )
+    assert result is False, "Auto-restart must be skipped when self_healing is disabled"
 
 
 def test_restart_triggered_when_self_healing_enabled(unhealthy_service):
@@ -112,7 +110,8 @@ def test_restart_skipped_when_policy_is_never(session):
         name="worker",
         image="my-worker:latest",
         restart_policy="never",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=0,
         consecutive_failures=3,
     )
@@ -121,9 +120,7 @@ def test_restart_skipped_when_policy_is_never(session):
     session.refresh(svc)
 
     result = should_restart(svc, self_healing_enabled=True)
-    assert result is False, (
-        "Restart must be blocked when restart_policy is 'never'"
-    )
+    assert result is False, "Restart must be blocked when restart_policy is 'never'"
 
 
 def test_restart_skipped_below_failure_threshold(session):
@@ -135,9 +132,10 @@ def test_restart_skipped_below_failure_threshold(session):
         name="redis",
         image="redis:7",
         restart_policy="always",
-        status="unhealthy",
+        status=ContainerStatus.RUNNING,
+        health_status=HealthStatus.UNHEALTHY,
         restart_count=0,
-        consecutive_failures=2,   # one below threshold
+        consecutive_failures=2,  # one below threshold
     )
     session.add(svc)
     session.commit()
@@ -158,13 +156,15 @@ def test_restart_not_called_when_self_healing_disabled():
             name="api",
             restart_policy="always",
             consecutive_failures=3,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
         MagicMock(
             name="worker",
             restart_policy="on-failure",
             consecutive_failures=5,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
     ]
 
@@ -179,9 +179,7 @@ def test_restart_not_called_when_self_healing_disabled():
     for svc in mock_services:
         fake_restart_if_allowed(svc, self_healing_enabled)
 
-    assert restarted == [], (
-        f"Expected no restarts but got: {restarted}"
-    )
+    assert restarted == [], f"Expected no restarts but got: {restarted}"
 
 
 def test_restart_called_when_self_healing_enabled():
@@ -193,12 +191,14 @@ def test_restart_called_when_self_healing_enabled():
         MagicMock(
             restart_policy="always",
             consecutive_failures=3,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
         MagicMock(
             restart_policy="on-failure",
             consecutive_failures=4,
-            status="unhealthy",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.UNHEALTHY,
         ),
     ]
     mock_services[0].name = "api"

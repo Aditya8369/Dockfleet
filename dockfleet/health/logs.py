@@ -1,7 +1,37 @@
-from datetime import datetime
-from typing import Any, Iterable, Optional
-from sqlmodel import Session, select, func
+from collections.abc import Iterable
+from datetime import datetime, timezone
+import logging
+
+from sqlmodel import Session, func, select
+
 from .models import LogEvent, Service, engine
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_EMPTY_TIMESTAMP: str = ""
+
+
+def _format_created_at(value: datetime | str | None) -> str:
+    """
+    Format a LogEvent created_at timestamp value to an ISO string representation.
+
+    Accepts:
+    - datetime: Formatted via value.isoformat()
+    - str: Returned as-is (backward compatibility: supports legacy rows written prior to this fix)
+    - None: Returns DEFAULT_EMPTY_TIMESTAMP ("")
+    - Other types: Logs a warning and falls back to str(value)
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        # Backward compatibility: handle legacy string-typed created_at rows written before the fix
+        return value
+    if value is None:
+        return DEFAULT_EMPTY_TIMESTAMP
+
+    logger.warning("Unrecognized created_at type %s for value: %r", type(value), value)
+    return str(value)
+
 
 def store_log_line(
     service_name: str,
@@ -14,10 +44,7 @@ def store_log_line(
 
     - Looks up Service by name and attaches service_id + service_name.
     - Skips insert (with a warning) if the service is not present in the DB.
-    - Intended callers:
-        * CLI dockfleet logs path (sampling/aggregation).
-        * SSE log streaming wrapper in the dashboard backend.
-        * Orchestrator for structured events.
+    - Persists created_at as a timezone-aware datetime instance (UTC).
     """
     with Session(engine) as session:
         svc = session.exec(
@@ -31,7 +58,7 @@ def store_log_line(
         event = LogEvent(
             service_id=svc.id,
             service_name=svc.name,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc),
             level=level,
             message=message,
             source=source,
@@ -40,9 +67,10 @@ def store_log_line(
         session.add(event)
         session.commit()
 
+
 def query_logs(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[LogEvent]:
@@ -55,34 +83,28 @@ def query_logs(
     - limit/offset: pagination for dashboard /logs/db and /logs/download
     """
     # hard cap for safety
-    if limit > 1000:
-        limit = 1000
+    limit = min(limit, 1000)
 
     with Session(engine) as session:
         stmt = select(LogEvent)
 
         if service_name:
-            stmt = stmt.where(
-                func.lower(LogEvent.service_name) == service_name.lower()
-            )
+            stmt = stmt.where(func.lower(LogEvent.service_name) == service_name.lower())
 
         if q:
             pattern = f"%{q}%"
             # SQLite: LIKE (case-sensitive by default); can be tuned later.
             stmt = stmt.where(LogEvent.message.like(pattern))
 
-        stmt = (
-            stmt.order_by(LogEvent.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        stmt = stmt.order_by(LogEvent.created_at.desc()).offset(offset).limit(limit)
         events = session.exec(stmt).all()
 
     return list(events)
 
+
 def iter_logs_as_text(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     batch_size: int = 1000,
 ) -> Iterable[str]:
     """
@@ -105,16 +127,17 @@ def iter_logs_as_text(
             break
 
         for event in batch:
-            ts = event.created_at.isoformat() if event.created_at else ""
+            ts = _format_created_at(event.created_at)
             service = event.service_name or ""
             msg = event.message or ""
             yield f"[{ts}] [{service}] {msg}\n"
 
         offset += batch_size
 
+
 def iter_logs_as_csv(
-    service_name: Optional[str] = None,
-    q: Optional[str] = None,
+    service_name: str | None = None,
+    q: str | None = None,
     batch_size: int = 1000,
 ) -> Iterable[str]:
     """
@@ -141,7 +164,7 @@ def iter_logs_as_csv(
         lines: list[str] = []
         for event in batch:
             service = event.service_name or ""
-            ts = event.created_at.isoformat() if event.created_at else ""
+            ts = _format_created_at(event.created_at)
             level = event.level or ""
             msg = (event.message or "").replace("\n", "\\n").replace('"', '""')
             source = event.source or ""
@@ -167,4 +190,3 @@ def iter_logs_as_csv(
             yield "\n".join(lines) + "\n"
 
         offset += batch_size
-        

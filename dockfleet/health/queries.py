@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 from collections import Counter
-from datetime import datetime, timedelta
-from typing import Any, Optional
-from sqlmodel import Session, select, func
-from .models import Service, RestartEvent, LogEvent, engine
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from sqlmodel import Session, func, select
+
+from .models import RestartEvent, Service, engine
+
 
 def get_all_services() -> list[Service]:
     """
@@ -14,6 +18,7 @@ def get_all_services() -> list[Service]:
     with Session(engine) as session:
         services = session.exec(select(Service)).all()
     return services
+
 
 def get_services_for_dashboard() -> list[dict[str, Any]]:
     """
@@ -44,6 +49,7 @@ def get_services_for_dashboard() -> list[dict[str, Any]]:
             }
         )
     return result
+
 
 def get_services_for_dashboard_with_stats(
     stats_by_name: dict[str, dict[str, Any]],
@@ -81,6 +87,7 @@ def get_services_for_dashboard_with_stats(
 
     return enriched
 
+
 def get_status_counts() -> dict[str, int]:
     """
     Return a simple count of services per status, e.g.:
@@ -103,7 +110,7 @@ def get_status_counts() -> dict[str, int]:
 
 def get_restart_history(
     service_name: str,
-    since: Optional[datetime] = None,
+    since: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return restart history for a service as list of dicts:
@@ -124,9 +131,7 @@ def get_restart_history(
         if svc is None:
             return []
 
-        stmt = select(RestartEvent).where(
-            RestartEvent.service_id == svc.id
-        )
+        stmt = select(RestartEvent).where(RestartEvent.service_id == svc.id)
 
         if since is not None:
             stmt = stmt.where(RestartEvent.restarted_at >= since)
@@ -144,6 +149,7 @@ def get_restart_history(
             for ev in events
         ]
 
+
 def get_most_unstable_services(
     limit: int = 5,
     window_hours: int = 24,
@@ -156,7 +162,7 @@ def get_most_unstable_services(
         {"service_name": "worker", "restarts": 1},
       ]
     """
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
     with Session(engine) as session:
         stmt = (
@@ -177,6 +183,7 @@ def get_most_unstable_services(
             }
             for name, count in rows
         ]
+
 
 def normalize_failure_reason(raw: str | None) -> str:
     """
@@ -205,7 +212,7 @@ def get_failure_reasons_breakdown(
     Aggregate restart reasons (grouped into categories) for a service
     in the last `window_hours`.
     """
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
 
     with Session(engine) as session:
         svc = session.exec(

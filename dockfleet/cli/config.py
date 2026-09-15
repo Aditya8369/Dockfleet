@@ -1,31 +1,43 @@
+import re
 from enum import Enum
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List, Dict, Union
+
+import typer
 import yaml
-import re
+from pydantic import BaseModel, ValidationError, field_validator
+
 
 # Healthcheck Model
 class HealthCheckConfig(BaseModel):
+    """Configuration for service health checks (HTTP, TCP, or process)."""
+
     type: str
-    endpoint: Optional[str] = None
-    interval: Optional[int] = None
+    endpoint: str | None = None
+    interval: int | None = None
+
 
 # Restart Policy Enum
 
+
 class RestartPolicy(str, Enum):
+    """Container restart policy options: always, on-failure, never."""
+
     always = "always"
     on_failure = "on-failure"
     never = "never"
 
+
 # Resources Model
 class ResourcesConfig(BaseModel):
-    memory: Optional[str] = None
-    cpu: Optional[float] = None
+    """Resource constraints for containers (memory and CPU limits)."""
+
+    memory: str | None = None
+    cpu: float | None = None
 
     @field_validator("memory")
     @classmethod
     def validate_memory(cls, value):
+        """Validate memory string format, e.g. 512m or 1g."""
         if value is None:
             return value
 
@@ -37,6 +49,7 @@ class ResourcesConfig(BaseModel):
     @field_validator("cpu")
     @classmethod
     def validate_cpu(cls, value):
+        """Validate CPU limit is a positive float."""
         if value is None:
             return value
 
@@ -45,21 +58,25 @@ class ResourcesConfig(BaseModel):
 
         return value
 
+
 # Service Model
 class ServiceConfig(BaseModel):
+    """Individual service specification in dockfleet.yaml."""
+
     image: str
     restart: RestartPolicy
-    ports: Optional[List[str]] = None
-    healthcheck: Optional[HealthCheckConfig] = None
-    resources: Optional[ResourcesConfig] = None
-    depends_on: Optional[List[str]] = None
-    environment: Optional[Union[List[str], Dict[str, str]]] = None
-    self_healing: Optional[bool] = None
+    ports: list[str] | None = None
+    healthcheck: HealthCheckConfig | None = None
+    resources: ResourcesConfig | None = None
+    depends_on: list[str] | None = None
+    environment: list[str] | dict[str, str] | None = None
+    self_healing: bool | None = None
 
-    #PORT VALIDATION 
+    # PORT VALIDATION
     @field_validator("ports")
     @classmethod
     def validate_ports(cls, value):
+        """Validate port mappings conform to host:container format."""
         if value is None:
             return value
 
@@ -73,10 +90,11 @@ class ServiceConfig(BaseModel):
 
         return value
 
-    #HEALTHCHECK VALIDATION 
+    # HEALTHCHECK VALIDATION
     @field_validator("healthcheck")
     @classmethod
     def validate_healthcheck(cls, value):
+        """Validate health check has type and interval specified."""
         if value is None:
             return value
 
@@ -88,10 +106,11 @@ class ServiceConfig(BaseModel):
 
         return value
 
-    #ENV VALIDATION
+    # ENV VALIDATION
     @field_validator("environment")
     @classmethod
     def validate_environment(cls, value):
+        """Validate environment variables formatted as list or dict."""
         if value is None:
             return value
 
@@ -111,15 +130,20 @@ class ServiceConfig(BaseModel):
 
         return value
 
+
 # Root Config Model
 
+
 class DockFleetConfig(BaseModel):
+    """Top-level Dockfleet deployment configuration model."""
+
     self_healing: bool = True
-    services: Dict[str, ServiceConfig]
-    
+    services: dict[str, ServiceConfig]
+
     @field_validator("services")
     @classmethod
     def validate_depends_on(cls, services):
+        """Validate dependency references point to existing services."""
         for name, svc in services.items():
             if svc.depends_on:
                 for dep in svc.depends_on:
@@ -129,12 +153,29 @@ class DockFleetConfig(BaseModel):
                         )
         return services
 
+
 # YAML Loader
 def load_config(path: Path) -> DockFleetConfig:
-    with open(path, "r") as f:
-        data = yaml.safe_load(f)
+    """Parse and validate YAML configuration file into a DockFleetConfig object."""
+    try:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
 
-    if not data:
-        raise ValueError("Config file is empty")
+        if not data:
+            typer.echo(f"Error: Config file '{path}' is empty.", err=True)
+            raise typer.Exit(code=1)
 
-    return DockFleetConfig(**data)
+        return DockFleetConfig(**data)
+    except yaml.YAMLError as e:
+        typer.echo(f"Error parsing YAML file '{path}':\n{e}", err=True)
+        raise typer.Exit(code=1)
+    except ValidationError as e:
+        typer.echo(f"Configuration Validation Error in '{path}':", err=True)
+        for err in e.errors():
+            loc = " -> ".join(str(location_part) for location_part in err["loc"])
+            msg = err["msg"]
+            typer.echo(f" - {loc}: {msg}", err=True)
+        raise typer.Exit(code=1)
+    except FileNotFoundError:
+        typer.echo(f"Error: Configuration file '{path}' not found.", err=True)
+        raise typer.Exit(code=1)

@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session
 
-from dockfleet.health.models import Service, LogEvent, engine, init_db
 from dockfleet.health.logs import (
-    query_logs,
-    iter_logs_as_text,
     iter_logs_as_csv,
+    iter_logs_as_text,
+    query_logs,
 )
+from dockfleet.health.models import LogEvent, Service, engine, init_db
 
 
 def setup_function(_func):

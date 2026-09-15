@@ -1,20 +1,18 @@
 def build_resource_flags(service_config: dict) -> list[str]:
-
+    """Build Docker CLI resource constraint flags (--memory, --cpus)."""
     flags = []
-
-    memory = service_config.get("memory")
-    cpus = service_config.get("cpus")
-
+    resources = service_config.get("resources") or {}
+    memory = resources.get("memory")
+    cpu = resources.get("cpu")
     if memory:
         flags.extend(["--memory", str(memory)])
-
-    if cpus:
-        flags.extend(["--cpus", str(cpus)])
-
+    if cpu:
+        flags.extend(["--cpus", str(cpu)])
     return flags
 
 
 def build_env_flags(service_config):
+    """Build Docker CLI environment variable flags (-e)."""
     flags = []
     env = service_config.get("environment") or service_config.get("env")
 
@@ -28,7 +26,9 @@ def build_env_flags(service_config):
 
     return flags
 
+
 def build_port_flags(config):
+    """Build Docker CLI port publishing flags (-p)."""
     flags = []
     ports = config.get("ports") or []
 

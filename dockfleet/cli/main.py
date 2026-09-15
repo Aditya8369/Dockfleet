@@ -1,9 +1,9 @@
-import sys
-import subprocess
-from pathlib import Path
 import logging
+import subprocess
+import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 import typer
 from pydantic import ValidationError
@@ -11,11 +11,12 @@ from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
 from dockfleet.core.orchestrator import Orchestrator, get_logs
-from dockfleet.health.seed import bootstrap_from_path
+from dockfleet.health.logs import LogEvent
+from dockfleet.health.models import PROJECT_ROOT, engine
+
 from dockfleet.health.scheduler import HealthScheduler
+from dockfleet.health.seed import bootstrap_from_path
 from dockfleet.health.status import update_service_health
-from dockfleet.health.models import engine
-from dockfleet.health.logs import LogEvent  # make sure this exists
 
 app = typer.Typer(help="DockFleet CLI - Manage Docker services from YAML configuration")
 validate_app = typer.Typer()
@@ -45,6 +46,7 @@ def setup_health_logging() -> None:
 # ------------------------------------------------
 # validate
 # ------------------------------------------------
+
 
 @validate_app.callback(invoke_without_command=True)
 def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -80,6 +82,7 @@ def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # seed
 # ------------------------------------------------
 
+
 @app.command()
 def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
     """Initialize the service database and register services from the configuration."""
@@ -95,6 +98,7 @@ def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # up
 # ------------------------------------------------
+
 
 @app.command()
 def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -120,7 +124,10 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
         bootstrap_from_path(str(path))
 
         # Start health scheduler in background (self-healing)
-        scheduler = HealthScheduler(config)
+        # Lock scope: PROJECT_ROOT (where dockfleet.db lives), not the config dir.
+        # This ensures CLI and dashboard always use the same lock regardless of
+        # where the YAML config file is located.
+        scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
         scheduler.start()
         typer.echo(
             f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
@@ -132,6 +139,8 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
         typer.echo("Services started.")
         typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error starting services: {e}")
         raise typer.Exit(code=1)
@@ -140,6 +149,7 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # down
 # ------------------------------------------------
+
 
 @app.command()
 def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -153,6 +163,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
         orch.down()
 
         typer.echo("\n✓ Services stopped")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
@@ -161,6 +173,7 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # ps
 # ------------------------------------------------
+
 
 @app.command()
 def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
@@ -171,6 +184,8 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
         config = load_config(path)
         orch = Orchestrator(config)
         orch.ps()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error listing containers: {e}")
         raise typer.Exit(code=1)
@@ -179,6 +194,7 @@ def ps(path: Path = typer.Argument("examples/dockfleet.yaml")):
 # ------------------------------------------------
 # logs (docker logs)
 # ------------------------------------------------
+
 
 @app.command()
 def logs(
@@ -204,6 +220,8 @@ def logs(
                 text=True,
             )
             typer.echo(result.stdout)
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo(f"Service '{service}' not found or container not running.")
         raise typer.Exit(code=1)
@@ -212,6 +230,7 @@ def logs(
 # ------------------------------------------------
 # show-logs (DB logs)
 # ------------------------------------------------
+
 
 @app.command("show-logs")
 def show_logs(
@@ -235,15 +254,15 @@ def show_logs(
                 return
 
             for log in logs:
-                ts = getattr(log, "timestamp", None) or getattr(
-                    log, "created_at", None
-                )
+                ts = getattr(log, "timestamp", None) or getattr(log, "created_at", None)
                 if ts:
                     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
                 else:
                     ts_str = "no-time"
 
                 typer.echo(f"[{ts_str}] [{log.service_name}] {log.message}")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Failed to fetch logs: {e}")
         raise typer.Exit(code=1)
@@ -252,6 +271,7 @@ def show_logs(
 # ------------------------------------------------
 # doctor
 # ------------------------------------------------
+
 
 @app.command()
 def doctor():
@@ -272,6 +292,8 @@ def doctor():
         )
         typer.echo(f"Docker detected: {result.stdout.strip()}")
         typer.echo("✓ Environment looks good")
+    except typer.Exit:
+        raise
     except Exception:
         typer.echo("✗ Docker not found or not running")
         raise typer.Exit(code=1)
@@ -280,6 +302,7 @@ def doctor():
 # ------------------------------------------------
 # health-dev (unchanged behavior, for dev)
 # ------------------------------------------------
+
 
 @app.command("health-dev")
 def health_dev(
@@ -318,16 +341,18 @@ def health_dev(
 
         # check if any service has healthcheck defined
         services_with_health = [
-            name
-            for name, svc in config.services.items()
-            if svc.healthcheck is not None
+            name for name, svc in config.services.items() if svc.healthcheck is not None
         ]
 
         if not services_with_health:
             typer.echo("No services with healthcheck defined in config.")
             raise typer.Exit(code=1)
 
-        scheduler = HealthScheduler(config)
+        # For --once mode, skip locking (single pass, no long-running scheduler).
+        # For long-running mode, lock to prevent duplicate schedulers.
+        # Lock scope: PROJECT_ROOT (where dockfleet.db lives).
+        project_dir = PROJECT_ROOT if not once else None
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         if once:
             scheduler._logger = logging.getLogger(__name__)
@@ -359,6 +384,8 @@ def health_dev(
         except KeyboardInterrupt:
             typer.echo("\nStopping health scheduler...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Health scheduler failed: {e}")
         raise typer.Exit(code=1)
@@ -367,6 +394,7 @@ def health_dev(
 # ------------------------------------------------
 # self-heal (unchanged; continuous health loop only)
 # ------------------------------------------------
+
 
 @app.command("self-heal")
 def self_heal(
@@ -383,7 +411,8 @@ def self_heal(
         typer.echo(f"Bootstrapping health DB from {path} ...")
         bootstrap_from_path(str(path))
 
-        scheduler = HealthScheduler(config)
+        project_dir = PROJECT_ROOT
+        scheduler = HealthScheduler(config, project_dir=project_dir)
 
         typer.echo("Self-healing active. Press Ctrl+C to stop.\n")
 
@@ -395,6 +424,8 @@ def self_heal(
         except KeyboardInterrupt:
             typer.echo("\nStopping self-healing loop...")
             scheduler.stop()
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Self-heal command failed: {e}")
         raise typer.Exit(code=1)
@@ -403,6 +434,7 @@ def self_heal(
 # ------------------------------------------------
 # health-logs (NEW)
 # ------------------------------------------------
+
 
 @app.command("health-logs")
 def health_logs(

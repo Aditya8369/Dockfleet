@@ -5,8 +5,9 @@ services:
   db:
     image: postgres:15
     restart: always
-    memory: "1024m"
-    cpus: "1.0"
+    resources:
+      memory: "1024m"
+      cpu: 1.0
 
     environment:
       POSTGRES_PASSWORD: example
@@ -45,4 +46,4 @@ services:
     healthcheck:
       type: http
       endpoint: "http://localhost:9999/health"  # nothing listening here
-      interval: 60
+      interval: 5

@@ -1,11 +1,18 @@
-from fastapi.testclient import TestClient
-from dockfleet.dashboard.api import app
+import asyncio
+import httpx
+from httpx import ASGITransport
 
-client = TestClient(app)
+from dockfleet.dashboard.api import app
 
 
 def test_get_services_schema():
-    response = client.get("/services")
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.get("/services")
+
+    response = asyncio.run(_run())
     assert response.status_code == 200
 
     data = response.json()
@@ -21,14 +28,24 @@ def test_get_services_schema():
 
 
 def test_restart_endpoint():
-    response = client.post("/services/api/restart")
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post("/services/api/restart")
 
+    response = asyncio.run(_run())
     # allow both success and safe failure
     assert response.status_code in [200, 400, 404]
 
 
 def test_stop_endpoint():
-    response = client.post("/services/api/stop")
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post("/services/api/stop")
 
+    response = asyncio.run(_run())
     # allow both success and safe failure
     assert response.status_code in [200, 400, 404]
