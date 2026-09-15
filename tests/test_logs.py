@@ -383,3 +383,29 @@ async def test_cleanup_failure_logged(mock_popen, mock_store, caplog):
             events.append(event)
 
     assert "failed to kill process" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+@patch('dockfleet.core.logs.store_log_line_in_db')
+@patch('dockfleet.core.logs.subprocess.Popen')
+async def test_reader_exception_propagation(mock_popen, mock_store, caplog):
+    """Exception during stdout readline -> logs exception with stack trace and yields error notification."""
+    import logging
+
+    mock_proc = MagicMock()
+    mock_proc.stdout.readline = MagicMock(side_effect=OSError("Read error"))
+    mock_proc.stderr.readline = MagicMock(return_value="")
+    mock_proc.wait = MagicMock(return_value=0)
+    mock_proc.returncode = 0
+    mock_proc.terminate = MagicMock()
+    mock_proc.poll = MagicMock(return_value=0)
+    mock_popen.return_value = mock_proc
+
+    with caplog.at_level(logging.ERROR, logger="dockfleet.core.logs"):
+        events = []
+        async for event in stream_container_logs("api"):
+            events.append(event)
+
+    assert len(events) >= 1
+    assert "error reading logs" in events[0].lower() or "read error" in events[0].lower()
+    assert "stdout reader" in caplog.text.lower() or "read error" in caplog.text.lower()
