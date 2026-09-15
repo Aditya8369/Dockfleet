@@ -10,6 +10,7 @@ def test_cli_validate_success():
     result = runner.invoke(app, ["validate", "examples/dockfleet.yaml"])
     assert result.exit_code == 0
     assert "Config valid" in result.stdout
+
 @patch("dockfleet.cli.main.Orchestrator.restart")
 def test_cli_restart(mock_restart):
     """Test that the restart command executes successfully without crashing."""
@@ -17,3 +18,12 @@ def test_cli_restart(mock_restart):
     assert result.exit_code == 0
     assert "Restarting services from" in result.stdout
     mock_restart.assert_called_once()
+
+@patch("dockfleet.cli.main.Orchestrator.restart")
+def test_cli_restart_failure(mock_restart):
+    """Test that the restart command handles and exits with code 1."""
+    mock_restart.side_effect = RuntimeError("Failed to stop services")
+    result = runner.invoke(app, ["restart", "examples/dockfleet.yaml"])
+    assert result.exit_code == 1
+    assert "Error restarting services" in result.stdout
+

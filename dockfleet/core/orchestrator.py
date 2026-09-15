@@ -289,7 +289,9 @@ class Orchestrator:
 
         # Try to start a fresh container
         try:
-            self.start_service(service_name, svc)
+            if not self.start_service(service_name, svc):
+                return False
+
             self._increment_restart_count(service_name)
             logger.info("%s restarted (count updated)", service_name)
             return True
@@ -479,6 +481,7 @@ class Orchestrator:
         if failed:
             raise RuntimeError(f"Failed to stop services: {failed}")
     def ps(self):
+        """List currently running containers managed by DockFleet."""
         print("Running containers:\n")
         self.docker.list_containers()
     def restart(self):
