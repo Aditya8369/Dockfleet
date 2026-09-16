@@ -4,6 +4,17 @@ This document explains how DockFleet is structured internally and how different 
 
 DockFleet is designed as a lightweight, local container orchestration tool. Instead of using heavy systems like Kubernetes, it focuses on simplicity while still supporting health monitoring, automatic recovery, centralized logs, and basic analytics.
 
+## Table of Contents
+- [1. High-Level Idea](#1-highlevel-idea)
+- [2. Overall Structure](#2-overall-structure)
+- [3. Main Components](#3-main-components)
+- [4. How Things Flow](#4-how-things-flow)
+- [5. YAML → Docker Mapping](#5-yaml--docker-mapping)
+- [6. Design Choices](#6-design-choices)
+- [7. Self-Healing Logic](#7-selfhealing-logic)
+- [8. Limitations](#8-limitations)
+- [9. Future Improvements](#9-future-improvements)
+- [10. Summary](#10-summary)
 ---
 
 ## 1. High‑Level Idea
