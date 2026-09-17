@@ -236,3 +236,34 @@ def test_invalid_restart_configuration_values(field, value) -> None:
             restart="always",
             **{field: value},
         )
+def test_failed_restart_counts_toward_restart_limit(monkeypatch) -> None:
+    config = _build_config(max_restarts=1)
+
+    _create_service()
+    _fail_service()
+
+    calls = []
+
+    def fake_restart(name, config):
+        calls.append(name)
+        return False
+
+    monkeypatch.setattr(
+        "dockfleet.health.scheduler.restart_service",
+        fake_restart,
+    )
+
+    scheduler = HealthScheduler(config=config)
+
+    # Failed restart still counts as an automatic restart attempt.
+    scheduler._handle_post_health("api")
+
+    assert calls == ["api"]
+    assert scheduler._restart_attempts["api"] == 1
+    assert "api" not in scheduler._next_restart_at
+
+    # The configured limit prevents another automatic restart.
+    _fail_service()
+    scheduler._handle_post_health("api")
+
+    assert calls == ["api"]

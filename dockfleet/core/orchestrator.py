@@ -433,7 +433,7 @@ class Orchestrator:
 
             # Try to start a fresh container
             try:
-                if not self.start_service(service_name, svc):
+                if self.start_service(service_name, svc) is False:
                     self._mark_restart_failed(service_name, "start_service returned False")
                     return False
                     

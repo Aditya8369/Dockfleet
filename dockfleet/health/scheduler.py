@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
 from dockfleet.core.orchestrator import mark_restart_failed, restart_service
 from dockfleet.health.checker import HealthChecker
-from dockfleet.health.models import Service, engine
+from dockfleet.health.models import HealthStatus, Service, engine
 from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.status import (
     mark_restart_successful,
@@ -284,9 +284,15 @@ class HealthScheduler:
             success = restart_service(svc.name, self.config)
 
             if not success:
-                self._logger.info(
-                    "HealthScheduler: restart_service skipped or already in progress for %s",
+                restart_attempts += 1
+                self._restart_attempts[name] = restart_attempts
+                self._next_restart_at.pop(name, None)
+
+                self._logger.warning(
+                    "HealthScheduler: restart failed for %s "
+                    "(attempt=%d)",
                     svc.name,
+                    restart_attempts,
                 )
                 return
 
