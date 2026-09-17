@@ -89,3 +89,86 @@ def test_invalid_environment():
 
     with pytest.raises(ValueError):
         DockFleetConfig(**config)
+def test_valid_self_healing_controls():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "self_healing": True,
+                "max_restarts": 5,
+                "backoff_seconds": 10,
+                "backoff_multiplier": 2.0,
+            }
+        }
+    }
+
+    parsed = DockFleetConfig(**config)
+
+    service = parsed.services["api"]
+    assert service.max_restarts == 5
+    assert service.backoff_seconds == 10
+    assert service.backoff_multiplier == 2.0
+
+
+def test_self_healing_controls_default_to_none():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+            }
+        }
+    }
+
+    parsed = DockFleetConfig(**config)
+
+    service = parsed.services["api"]
+    assert service.max_restarts is None
+    assert service.backoff_seconds is None
+    assert service.backoff_multiplier is None
+
+
+def test_invalid_max_restarts():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "max_restarts": 0,
+            }
+        }
+    }
+
+    with pytest.raises(ValueError):
+        DockFleetConfig(**config)
+
+
+def test_invalid_backoff_seconds():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "backoff_seconds": -1,
+            }
+        }
+    }
+
+    with pytest.raises(ValueError):
+        DockFleetConfig(**config)
+
+
+def test_invalid_backoff_multiplier():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "backoff_multiplier": 0.5,
+            }
+        }
+    }
+
+    with pytest.raises(ValueError):
+        DockFleetConfig(**config)
