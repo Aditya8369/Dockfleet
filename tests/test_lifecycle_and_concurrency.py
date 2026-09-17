@@ -173,7 +173,7 @@ def test_health_check_failure_preserves_running_status_as_is():
 
     svc = _get_service("status-as-is-svc")
     assert svc.status == ContainerStatus.RUNNING  # container status preserved as-is!
-    assert svc.health_status == HealthStatus.CRASHED  # health dimension updated!
+    assert svc.health_status == HealthStatus.UNHEALTHY  # health dimension updated!
 
 
 def test_json_wire_serialization_emits_clean_strings():

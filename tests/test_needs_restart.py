@@ -81,7 +81,7 @@ def test_needs_restart_false_before_threshold() -> None:
     svc = _get_service("svc3")
 
     assert svc.consecutive_failures == 2
-    assert svc.health_status == HealthStatus.CRASHED
+    assert svc.health_status == HealthStatus.UNHEALTHY
     assert needs_restart(svc) is False
 
 

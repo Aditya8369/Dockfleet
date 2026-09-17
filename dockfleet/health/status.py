@@ -102,8 +102,11 @@ def update_service_health(
             svc.health_status = HealthStatus.HEALTHY
             svc.consecutive_failures = 0
         else:
-            svc.health_status = HealthStatus.CRASHED
             svc.consecutive_failures += 1
+            if svc.consecutive_failures >= 3:
+                svc.health_status = HealthStatus.CRASHED
+            else:
+                svc.health_status = HealthStatus.UNHEALTHY
             if reason:
                 svc.last_failure_reason = reason
 
