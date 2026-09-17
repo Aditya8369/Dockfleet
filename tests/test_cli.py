@@ -12,6 +12,21 @@ def test_cli_validate_success():
     assert "Config valid" in result.stdout
 
 
+def test_cli_validate_invalid_schema(tmp_path):
+    bad_config = tmp_path / "bad.yaml"
+    bad_config.write_text("""
+services:
+  web:
+    image: nginx
+    resources:
+      cpu: -1.0
+""")
+    result = runner.invoke(app, ["validate", str(bad_config)])
+    assert result.exit_code == 1
+    assert "Unexpected error:" not in result.stdout
+    assert "Configuration Validation Error" in result.output
+
+
 @patch("dockfleet.cli.main.Orchestrator.restart")
 def test_cli_restart(mock_restart):
     """Test that the restart command executes successfully without crashing."""
