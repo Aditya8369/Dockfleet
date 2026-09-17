@@ -46,6 +46,11 @@ class HealthScheduler:
         # allow injecting a fake checker in tests, default to real one.
         self._checker: HealthChecker = checker or HealthChecker()
 
+        # Runtime state for automatic restart recovery cycles.
+        # These values reset when a service becomes healthy again.
+        self._restart_attempts: dict[str, int] = {}
+        self._next_restart_at: dict[str, float] = {}
+
         # Cross-process lock to prevent duplicate schedulers for the same
         # project.  Callers must pass ``project_dir`` explicitly to enable
         # locking; ``None`` disables it (e.g. in tests that manage the
@@ -149,6 +154,10 @@ class HealthScheduler:
                     status_str = "HEALTHY" if ok else "UNHEALTHY"
                     self._logger.info("HealthScheduler: %s -> %s", name, status_str)
 
+                    if ok:
+                        self._restart_attempts.pop(name, None)
+                        self._next_restart_at.pop(name, None)
+
                     update_service_health(
                         name,
                         ok,
@@ -218,6 +227,49 @@ class HealthScheduler:
         if not needs_restart(svc):
             return
 
+        # Per-service restart limit.
+        max_restarts = getattr(svc_cfg, "max_restarts", None)
+        restart_attempts = self._restart_attempts.get(name, 0)
+
+        if max_restarts is not None and restart_attempts >= max_restarts:
+            self._logger.warning(
+                "HealthScheduler: restart limit reached for %s "
+                "(attempts=%d, max_restarts=%d)",
+                name,
+                restart_attempts,
+                max_restarts,
+            )
+            return
+
+        # Exponential backoff before automatic restart.
+        backoff_seconds = getattr(svc_cfg, "backoff_seconds", None)
+        backoff_multiplier = getattr(svc_cfg, "backoff_multiplier", None)
+
+        if backoff_seconds is not None:
+            multiplier = backoff_multiplier if backoff_multiplier is not None else 1.0
+            delay = backoff_seconds * (multiplier ** restart_attempts)
+
+            now = time.monotonic()
+            next_restart_at = self._next_restart_at.get(name)
+
+            if next_restart_at is None:
+                self._next_restart_at[name] = now + delay
+
+                if delay > 0:
+                    self._logger.info(
+                        "HealthScheduler: delaying restart for %s by %.2f seconds",
+                        name,
+                        delay,
+                    )
+                    return
+            elif now < next_restart_at:
+                self._logger.debug(
+                    "HealthScheduler: backoff active for %s (%.2f seconds remaining)",
+                    name,
+                    next_restart_at - now,
+                )
+                return
+
         self._logger.info(
             "HealthScheduler: auto-restart candidate detected: %s "
             "(policy=%s, consecutive_failures=%d, health_status=%s)",
@@ -238,6 +290,11 @@ class HealthScheduler:
                 )
                 return
 
+            # Count this automatic restart attempt.
+            restart_attempts += 1
+            self._restart_attempts[name] = restart_attempts
+            self._next_restart_at.pop(name, None)
+
             # On success: reset streak, mark running+healthy, and record event.
             mark_restart_successful(svc.name)
             record_restart_event(svc, "3_failed_health_checks")
@@ -248,6 +305,10 @@ class HealthScheduler:
                 svc.name,
                 exc,
             )
+
+            self._restart_attempts[name] = restart_attempts + 1
+            self._next_restart_at.pop(name, None)
+
             mark_restart_failed(svc.name, str(exc))
 
     def _run_single_check(self, name: str, hc: HealthCheckConfig) -> bool:

@@ -71,6 +71,9 @@ class ServiceConfig(BaseModel):
     depends_on: list[str] | None = None
     environment: list[str] | dict[str, str] | None = None
     self_healing: bool | None = None
+    max_restarts: int | None = None
+    backoff_seconds: float | None = None
+    backoff_multiplier: float | None = None
 
     # PORT VALIDATION
     @field_validator("ports")
@@ -130,9 +133,31 @@ class ServiceConfig(BaseModel):
 
         return value
 
+    @field_validator("max_restarts")
+    @classmethod
+    def validate_max_restarts(cls, value):
+        """Validate maximum self-healing restart attempts."""
+        if value is not None and value <= 0:
+            raise ValueError("max_restarts must be greater than 0")
+        return value
+
+    @field_validator("backoff_seconds")
+    @classmethod
+    def validate_backoff_seconds(cls, value):
+        """Validate initial restart backoff."""
+        if value is not None and value < 0:
+            raise ValueError("backoff_seconds must be non-negative")
+        return value
+
+    @field_validator("backoff_multiplier")
+    @classmethod
+    def validate_backoff_multiplier(cls, value):
+        """Validate exponential backoff multiplier."""
+        if value is not None and value < 1:
+            raise ValueError("backoff_multiplier must be at least 1")
+        return value
 
 # Root Config Model
-
 
 class DockFleetConfig(BaseModel):
     """Top-level Dockfleet deployment configuration model."""
