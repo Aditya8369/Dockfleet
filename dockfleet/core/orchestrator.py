@@ -129,15 +129,7 @@ def _warn_on_mismatch(orch, config, self_healing):
 
 
 def reset_orchestrator():
-    """Clear the module-level Orchestrator singleton.
-
-    After this call, the next :func:`get_orchestrator` invocation will create
-    a brand-new instance with whatever arguments are passed.
-
-    Intended for test teardown and legitimate full-reconfiguration flows.
-    **Not** to be called automatically in production code paths — callers
-    should treat this as a deliberate, explicit action.
-
+    """
     Safe to call even if no singleton has been created yet (no-op).
 
     Thread-safe: holds ``_orchestrator_lock`` for the entire operation so
@@ -149,10 +141,14 @@ def reset_orchestrator():
         _orchestrator_instance = None
 
 
-def restart_service(name: str, config=None) -> bool:
+def restart_service(
+    name: str,
+    config=None,
+    detailed: bool = False,
+) -> bool | None:
     """Module wrapper for HealthScheduler."""
     orch = get_orchestrator(config)
-    return orch.restart_service(name, config)
+    return orch.restart_service(name, config, detailed=detailed)
 
 
 def mark_restart_failed(name: str, reason: str) -> None:
@@ -355,7 +351,8 @@ class Orchestrator:
         service_name: str,
         config=None,
         backoff_attempt: int = 0,
-    ) -> bool:
+        detailed: bool = False,
+    ) -> bool | None:
         """
         Restart a service's container, respecting restart_policy and self_healing.
 
@@ -389,7 +386,7 @@ class Orchestrator:
         with self._restart_lock:
             if service_name in self._active_restarts:
                 logger.warning("Restart already in progress for service %s", service_name)
-                return False
+                return None if detailed else False
             self._active_restarts.add(service_name)
 
         try:

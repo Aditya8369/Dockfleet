@@ -75,7 +75,7 @@ def test_default_settings_preserve_existing_restart_behavior(monkeypatch) -> Non
 
     calls = []
 
-    def fake_restart(name, config):
+    def fake_restart(name, config, detailed=False):
         calls.append(name)
         return True
 
@@ -105,7 +105,7 @@ def test_exponential_backoff_increases_between_restart_attempts(
 
     calls = []
 
-    def fake_restart(name, config):
+    def fake_restart(name, config, detailed=False):
         calls.append(name)
         return True
 
@@ -157,7 +157,7 @@ def test_max_restarts_stops_repeated_automatic_restarts(monkeypatch) -> None:
 
     calls = []
 
-    def fake_restart(name, config):
+    def fake_restart(name, config, detailed=False):
         calls.append(name)
         return True
 
@@ -244,7 +244,7 @@ def test_failed_restart_counts_toward_restart_limit(monkeypatch) -> None:
 
     calls = []
 
-    def fake_restart(name, config):
+    def fake_restart(name, config, detailed=False):
         calls.append(name)
         return False
 

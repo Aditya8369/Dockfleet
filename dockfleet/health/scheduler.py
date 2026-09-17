@@ -281,7 +281,18 @@ class HealthScheduler:
 
         # Delegate to orchestrator
         try:
-            success = restart_service(svc.name, self.config)
+            success = restart_service(
+                svc.name,
+                self.config,
+                detailed=True,
+            )
+
+            if success is None:
+                self._logger.info(
+                    "HealthScheduler: restart already in progress for %s",
+                    svc.name,
+                )
+                return
 
             if not success:
                 restart_attempts += 1
