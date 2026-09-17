@@ -96,12 +96,12 @@ def test_scheduler_uses_injected_checker_and_db_updates(tmp_path):
     assert svc.status == ContainerStatus.RUNNING
     assert svc.health_status == HealthStatus.HEALTHY
 
-    # Tick 2: unhealthy check -> status stays running, health_status becomes crashed
+    # Tick 2: unhealthy check -> status stays running, health_status becomes unhealthy
     ok2 = scheduler._run_single_check(service_name, hc)
     update_service_health(service_name, ok2, reason="fail 1")
     svc = get_service()
     assert svc.status == ContainerStatus.RUNNING
-    assert svc.health_status == HealthStatus.CRASHED
+    assert svc.health_status == HealthStatus.UNHEALTHY
     assert svc.consecutive_failures == 1
 
     # Tick 3: unhealthy check
@@ -109,5 +109,13 @@ def test_scheduler_uses_injected_checker_and_db_updates(tmp_path):
     update_service_health(service_name, ok3, reason="fail 2")
     svc = get_service()
     assert svc.status == ContainerStatus.RUNNING
-    assert svc.health_status == HealthStatus.CRASHED
+    assert svc.health_status == HealthStatus.UNHEALTHY
     assert svc.consecutive_failures == 2
+
+    # Tick 4: 3rd unhealthy check -> reaches threshold for CRASHED
+    ok4 = scheduler._run_single_check(service_name, hc)
+    update_service_health(service_name, ok4, reason="fail 3")
+    svc = get_service()
+    assert svc.status == ContainerStatus.RUNNING
+    assert svc.health_status == HealthStatus.CRASHED
+    assert svc.consecutive_failures == 3

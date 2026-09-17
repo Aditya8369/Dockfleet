@@ -51,7 +51,7 @@ def test_consecutive_failures_and_status_transitions(tmp_path):
     update_service_health(service_name, is_healthy=False, reason="fail 1")
     svc = get_service()
     assert svc.status == "running"
-    assert svc.health_status == "crashed"
+    assert svc.health_status == "unhealthy"
     assert svc.consecutive_failures == 1
     assert svc.restart_count == baseline_restart_count
     assert svc.last_failure_reason == "fail 1"
@@ -60,7 +60,16 @@ def test_consecutive_failures_and_status_transitions(tmp_path):
     update_service_health(service_name, is_healthy=False, reason="fail 2")
     svc = get_service()
     assert svc.status == "running"
-    assert svc.health_status == "crashed"
+    assert svc.health_status == "unhealthy"
     assert svc.consecutive_failures == 2
     assert svc.restart_count == baseline_restart_count
     assert svc.last_failure_reason == "fail 2"
+
+    # Cycle 4: 3rd consecutive failure -> reaches threshold for CRASHED
+    update_service_health(service_name, is_healthy=False, reason="fail 3")
+    svc = get_service()
+    assert svc.status == "running"
+    assert svc.health_status == "crashed"
+    assert svc.consecutive_failures == 3
+    assert svc.restart_count == baseline_restart_count
+    assert svc.last_failure_reason == "fail 3"
