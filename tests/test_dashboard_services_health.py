@@ -81,3 +81,55 @@ def test_get_services_preserves_unhealthy_status(monkeypatch):
 
     assert services_by_name["web_healthy"]["health_status"] == HealthStatus.HEALTHY.value
     assert services_by_name["web_healthy"]["status"] == ContainerStatus.RUNNING.value
+
+
+def test_get_services_handles_none_and_non_string_names(monkeypatch):
+    test_engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc = DBService(
+            name="web",
+            status=ContainerStatus.STOPPED,
+            health_status=HealthStatus.HEALTHY,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=0,
+        )
+        session.add(svc)
+        session.commit()
+
+    monkeypatch.setattr("dockfleet.dashboard.services.engine", test_engine)
+
+    # Various edge case container names in ps output: None, missing, list, non-dockfleet
+    docker_ps_output = "\n".join([
+        json.dumps({"Names": None, "Status": "Up 5 minutes"}),
+        json.dumps({"OtherKey": "value"}),
+        json.dumps({"Names": ["dockfleet_web"], "Status": "Up 5 minutes", "RunningFor": "5 minutes"}),
+        json.dumps({"Names": ["other_container"], "Status": "Up 5 minutes"}),
+        json.dumps({"Names": [], "Status": "Up 5 minutes"}),
+        json.dumps({"Names": 12345, "Status": "Up 5 minutes"}),
+    ])
+
+    docker_stats_output = "\n".join([
+        json.dumps({"Name": None, "CPUPerc": "1.5%", "MemUsage": "50MB"}),
+        json.dumps({"Name": ["dockfleet_web"], "CPUPerc": "2.0%", "MemUsage": "60MB"}),
+        json.dumps({"OtherKey": "val"}),
+    ])
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        mock_res = MagicMock()
+        if "ps" in cmd:
+            mock_res.stdout = docker_ps_output
+        elif "stats" in cmd:
+            mock_res.stdout = docker_stats_output
+        return mock_res
+
+    with patch("subprocess.run", side_effect=mock_subprocess_run):
+        services = get_services()
+
+    assert len(services) == 1
+    assert services[0]["name"] == "web"
+    assert services[0]["status"] == ContainerStatus.RUNNING.value
+    assert services[0]["cpu"] == "2.0%"
+    assert services[0]["memory"] == "60MB"
