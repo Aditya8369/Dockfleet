@@ -55,3 +55,60 @@ def test_store_log_skips_unknown_service():
         )
 
     assert len(rows) == 0
+
+
+def test_ingest_docker_logs_once_initial_and_incremental(monkeypatch):
+    from unittest.mock import MagicMock, patch
+    from dockfleet.health.log_ingestor import ingest_docker_logs_once
+
+    with Session(engine) as session:
+        svc = Service(
+            name="api",
+            image="dummy-image",
+            restart_policy="always",
+        )
+        session.add(svc)
+        session.commit()
+
+    recorded_cmds = []
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        recorded_cmds.append(cmd)
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        if "--tail" in cmd:
+            mock_res.stdout = "line 1\nline 2\n"
+        elif "--since" in cmd:
+            mock_res.stdout = "line 3\n"
+        else:
+            mock_res.stdout = ""
+        return mock_res
+
+    with patch("subprocess.run", side_effect=mock_subprocess_run):
+        # 1. Initial ingest (no prior logs) -> should use --tail
+        ingest_docker_logs_once(tail=200)
+
+        with Session(engine) as session:
+            rows = session.exec(select(LogEvent).where(LogEvent.service_name == "api")).all()
+            assert len(rows) == 2
+            messages = [r.message for r in rows]
+            assert messages == ["line 1", "line 2"]
+
+        assert len(recorded_cmds) == 1
+        assert recorded_cmds[0][:4] == ["docker", "logs", "--tail", "200"]
+        assert recorded_cmds[0][-1] == "dockfleet_api"
+
+        # 2. Subsequent ingest -> should use --since with latest_ts isoformat
+        ingest_docker_logs_once(tail=200)
+
+        with Session(engine) as session:
+            rows = session.exec(select(LogEvent).where(LogEvent.service_name == "api").order_by(LogEvent.created_at)).all()
+            assert len(rows) == 3
+            messages = [r.message for r in rows]
+            assert messages == ["line 1", "line 2", "line 3"]
+
+        assert len(recorded_cmds) == 2
+        assert recorded_cmds[1][:2] == ["docker", "logs"]
+        assert recorded_cmds[1][2] == "--since"
+        assert recorded_cmds[1][-1] == "dockfleet_api"
+

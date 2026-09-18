@@ -60,3 +60,12 @@ def test_cli_restart_absent_container(mock_up, mock_stop, mock_remove, mock_mark
     # Ensure it didn't crash and successfully reached up()
     assert result.exit_code == 0
     mock_up.assert_called_once()
+
+
+@patch("dockfleet.cli.main.importlib.metadata.version")
+def test_cli_version(mock_version):
+    """Test that the --version option outputs the version and exits."""
+    mock_version.return_value = "1.2.3"
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert "DockFleet version 1.2.3" in result.stdout

@@ -207,16 +207,24 @@ class SchedulerLock:
         """
         if pid <= 0:
             return False
-        try:
-            os.kill(pid, 0)
-            return True
-        except PermissionError:
-            # Cannot check — assume alive to avoid stealing the lock.
-            return True
-        except ProcessLookupError:
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h_process = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if h_process:
+                kernel32.CloseHandle(h_process)
+                return True
             return False
-        except OSError:
-            return False
+        else:
+            try:
+                os.kill(pid, 0)
+                return True
+            except PermissionError:
+                # Cannot check — assume alive to avoid stealing the lock.
+                return True
+            except OSError:
+                return False
 
     def _raise_conflict(self) -> None:
         """

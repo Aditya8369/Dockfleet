@@ -687,7 +687,6 @@ class Orchestrator:
         else:
             print("Running containers:\n")
             self.docker.list_containers()
-
     def restart(self):
         """
         Gracefully restart all services managed by DockFleet. This is a convenience wrapper around down() and up().

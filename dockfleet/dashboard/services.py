@@ -57,9 +57,10 @@ def get_services() -> list[dict]:
                 continue
 
             container = json.loads(line)
-            name = container.get("Names")
-
-            if not name.startswith("dockfleet_"):
+            name = container.get("Names") or container.get("Name") or ""
+            if isinstance(name, list):
+                name = name[0] if name else ""
+            if not isinstance(name, str) or not name.startswith("dockfleet_"):
                 continue
 
             service_name = name.replace("dockfleet_", "")
@@ -123,9 +124,10 @@ def get_services() -> list[dict]:
                 continue
 
             container = json.loads(line)
-            name = container.get("Name")
-
-            if not name.startswith("dockfleet_"):
+            name = container.get("Names") or container.get("Name") or ""
+            if isinstance(name, list):
+                name = name[0] if name else ""
+            if not isinstance(name, str) or not name.startswith("dockfleet_"):
                 continue
 
             service_name = name.replace("dockfleet_", "")
