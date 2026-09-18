@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
-from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
@@ -54,25 +53,8 @@ def validate(path: Path = typer.Argument("examples/dockfleet.yaml")):
     try:
         load_config(path)
         typer.echo("✓ Config valid")
-    except ValidationError as e:
-        typer.echo("✗ Config validation failed\n")
-
-        for err in e.errors():
-            location = " -> ".join(str(x) for x in err["loc"])
-            msg = err["msg"]
-
-            if "resources" in location and "memory" in location:
-                typer.echo(f"[ERROR] Invalid memory limit → {msg}")
-            elif "resources" in location and "cpu" in location:
-                typer.echo(f"[ERROR] Invalid CPU value → {msg}")
-            elif "depends_on" in location:
-                typer.echo(f"[ERROR] Dependency issue → {msg}")
-            elif "environment" in location:
-                typer.echo(f"[ERROR] Environment format issue → {msg}")
-            else:
-                typer.echo(f"[ERROR] {location}: {msg}")
-
-        raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Unexpected error: {e}")
         raise typer.Exit(code=1)
