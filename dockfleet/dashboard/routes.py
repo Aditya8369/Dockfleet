@@ -39,10 +39,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def to_ist_iso(dt: datetime | None) -> str | None:
-    """Convert naive UTC datetime to IST ISO string."""
+    """Convert UTC datetime to IST ISO string."""
     if dt is None:
         return None
-    dt_utc = dt.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
     dt_ist = dt_utc.astimezone(IST)
     return dt_ist.isoformat()
 
@@ -265,11 +268,15 @@ def restart_service(name: str):
 def stop_service(name: str):
     """Trigger a manual container stop for the given service."""
     container = f"dockfleet_{name}"
-    result = subprocess.run(["docker", "stop", container], capture_output=True)
-    ok = result.returncode == 0
+    try:
+        result = subprocess.run(["docker", "stop", container], capture_output=True)
+        ok = result.returncode == 0
+    except Exception:
+        ok = False
     if ok:
         record_manual_stop(name)
-    return {"message": f"{name} stopped", "ok": ok}
+        return {"message": f"{name} stopped", "ok": True}
+    return {"message": f"Failed to stop {name}", "ok": False}
 
 
 # ------------------------------------------------
@@ -303,7 +310,7 @@ def list_logs(
 @router.get("/logs/explore/{service_name}")
 async def explore_logs(service_name: str, days: int = 1):
     """Retrieve time-windowed log records for a service."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     with Session(engine) as session:
         statement = (
@@ -379,11 +386,16 @@ def system_status():
 
     total = len(services)
     running = sum(1 for s in services if s["status"] == ContainerStatus.RUNNING.value)
-    restarting = sum(1 for s in services if s["status"] == HealthStatus.RESTARTING.value)
+    restarting = sum(
+        1 for s in services if s["status"] == HealthStatus.RESTARTING.value
+    )
     stopped = sum(1 for s in services if s["status"] == ContainerStatus.STOPPED.value)
 
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        1
+        for s in services
+        if s.get("health_status")
+        in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
 
     return {
@@ -401,6 +413,7 @@ def system_status():
 @router.get("/logs/stream/{service}")
 async def stream_logs(service: str):
     """Server-Sent Events (SSE) endpoint to stream real-time container log lines."""
+
     async def event_stream():
         try:
             async for line in stream_container_logs(service):
@@ -442,24 +455,34 @@ def get_metrics():
     services = get_services()
 
     total = len(services)
-    running = sum(1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value)
+    running = sum(
+        1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value
+    )
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        1
+        for s in services
+        if s.get("health_status")
+        in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
     stopped = sum(
         1
         for s in services
         if s.get("health_status")
-        not in (HealthStatus.HEALTHY.value, HealthStatus.RESTARTING.value, HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        not in (
+            HealthStatus.HEALTHY.value,
+            HealthStatus.RESTARTING.value,
+            HealthStatus.UNHEALTHY.value,
+            HealthStatus.CRASHED.value,
+        )
     )
     total_restarts = sum(s.get("restart_count", 0) for s in services)
 
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
     with Session(engine) as session:
         stmt = select(RestartEvent).where(RestartEvent.restarted_at >= since)
         health_failures = len(session.exec(stmt).all())
 
-    collected_utc = datetime.utcnow()
+    collected_utc = datetime.now(timezone.utc)
     return MetricsSummary(
         total_services=total,
         running_services=running,
@@ -492,7 +515,7 @@ def analytics_summary(
     ),
 ):
     """Retrieve overall crash analytics summary within a time window."""
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
     base = get_most_unstable_services(limit=limit, window_hours=window_hours)
 
     with Session(engine) as session:
@@ -585,7 +608,7 @@ def analytics_restart_history(
     since_hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
 ):
     """Retrieve chronologically ordered restart events for a service."""
-    since = datetime.utcnow() - timedelta(hours=since_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     history = get_restart_history(service_name, since=since)
 
     return [

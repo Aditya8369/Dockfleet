@@ -17,6 +17,7 @@ from dockfleet.core.orchestrator import (
 # Existing tests (cleaned up)
 # ------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _cleanup_singleton():
     """Ensure every test starts and ends with no singleton."""
@@ -93,15 +94,12 @@ def test_container_naming_consistent(service_name):
 # Singleton lifecycle tests (new)
 # ------------------------------------------------
 
+
 @patch("dockfleet.core.orchestrator.Orchestrator")
 def test_get_orchestrator_returns_same_instance(mock_orch_class):
     """Repeated calls with identical args return the same instance."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     first = get_orchestrator(config=config, self_healing=True)
@@ -118,18 +116,10 @@ def test_get_orchestrator_returns_same_instance(mock_orch_class):
 def test_get_orchestrator_warns_on_config_mismatch(mock_orch_class, caplog):
     """Different config triggers a warning and returns original instance."""
     config_a = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
     config_b = DockFleetConfig(
-        services={
-            "other": ServiceConfig(
-                image="redis", restart=RestartPolicy.never
-            )
-        }
+        services={"other": ServiceConfig(image="redis", restart=RestartPolicy.never)}
     )
 
     first = get_orchestrator(config=config_a, self_healing=True)
@@ -145,11 +135,7 @@ def test_get_orchestrator_warns_on_config_mismatch(mock_orch_class, caplog):
 def test_get_orchestrator_warns_on_self_healing_mismatch(mock_orch_class, caplog):
     """Different self_healing triggers a warning and returns original instance."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     first = get_orchestrator(config=config, self_healing=True)
@@ -165,11 +151,7 @@ def test_get_orchestrator_warns_on_self_healing_mismatch(mock_orch_class, caplog
 def test_get_orchestrator_no_warning_when_identical(mock_orch_class, caplog):
     """Identical args produce no warning."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     # Set mock instance attributes so the comparison inside _warn_on_mismatch
@@ -189,18 +171,10 @@ def test_get_orchestrator_no_warning_when_identical(mock_orch_class, caplog):
 def test_reset_orchestrator_clears_singleton(mock_orch_class):
     """After reset, next get_orchestrator creates a fresh instance."""
     config_a = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
     config_b = DockFleetConfig(
-        services={
-            "other": ServiceConfig(
-                image="redis", restart=RestartPolicy.never
-            )
-        }
+        services={"other": ServiceConfig(image="redis", restart=RestartPolicy.never)}
     )
 
     # Make each Orchestrator() call return a distinct mock instance
@@ -233,11 +207,7 @@ def test_reset_orchestrator_safe_when_no_instance():
 def test_reset_orchestrator_safe_when_instance_exists(mock_orch_class):
     """reset_orchestrator() cleanly clears an existing instance."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
     get_orchestrator(config=config, self_healing=True)
     reset_orchestrator()
@@ -248,11 +218,7 @@ def test_reset_orchestrator_safe_when_instance_exists(mock_orch_class):
 def test_concurrent_first_call_creates_single_instance(mock_orch_class):
     """Only one Orchestrator is created even with concurrent first calls."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     barrier = threading.Barrier(10)
@@ -314,11 +280,7 @@ def test_no_spurious_warning_when_self_healing_omitted(mock_orch_class, caplog):
     trigger a spurious self_healing mismatch warning.
     """
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     # Create singleton with self_healing=False
@@ -337,11 +299,7 @@ def test_no_spurious_warning_when_self_healing_omitted(mock_orch_class, caplog):
 def test_no_warning_when_explicit_self_healing_matches(mock_orch_class, caplog):
     """Explicitly passing the same self_healing value must not warn."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     # Set mock instance attributes so _warn_on_mismatch comparison works
@@ -360,11 +318,7 @@ def test_no_warning_when_explicit_self_healing_matches(mock_orch_class, caplog):
 def test_warning_when_explicit_self_healing_differs(mock_orch_class, caplog):
     """Explicitly passing a different self_healing must warn."""
     config = DockFleetConfig(
-        services={
-            "svc": ServiceConfig(
-                image="nginx", restart=RestartPolicy.always
-            )
-        }
+        services={"svc": ServiceConfig(image="nginx", restart=RestartPolicy.always)}
     )
 
     # Set mock instance attributes so _warn_on_mismatch comparison works
@@ -467,9 +421,7 @@ def test_concurrent_get_reset_no_stale_instance():
                 orch = get_orchestrator()
                 # Every returned instance must be a valid TaggedOrchestrator
                 if not isinstance(orch, TaggedOrchestrator):
-                    errors.append(
-                        f"returned non-TaggedOrchestrator: {type(orch)}"
-                    )
+                    errors.append(f"returned non-TaggedOrchestrator: {type(orch)}")
                 elif not hasattr(orch, "generation"):
                     errors.append("returned instance missing generation")
                 else:

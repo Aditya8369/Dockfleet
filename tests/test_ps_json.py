@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
@@ -11,8 +11,7 @@ runner = CliRunner()
 @pytest.fixture
 def mock_dockfleet_yaml(tmp_path):
     yaml_file = tmp_path / "dockfleet.yaml"
-    yaml_file.write_text(
-        """
+    yaml_file.write_text("""
 version: "1.0"
 project: test
 services:
@@ -22,8 +21,7 @@ services:
   redis:
     image: redis:alpine
     restart: always
-"""
-    )
+""")
     return str(yaml_file)
 
 

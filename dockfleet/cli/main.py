@@ -10,7 +10,7 @@ import typer
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import load_config
-from dockfleet.core.orchestrator import Orchestrator, get_logs
+from dockfleet.core.orchestrator import Orchestrator
 from dockfleet.health.logs import LogEvent
 from dockfleet.health.models import PROJECT_ROOT, engine
 
@@ -174,6 +174,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
+
+
 # ------------------------------------------------
 # restart
 # ------------------------------------------------
@@ -191,6 +193,7 @@ def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
     except Exception as e:
         typer.echo(f"Error restarting services: {e}")
         raise typer.Exit(code=1)
+
 
 # ------------------------------------------------
 # ps
@@ -220,7 +223,6 @@ def ps(
         else:
             typer.echo(f"Error listing containers: {e}")
         raise typer.Exit(code=1)
-
 
 
 # ------------------------------------------------

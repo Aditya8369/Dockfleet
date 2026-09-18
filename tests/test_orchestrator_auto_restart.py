@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock, patch
 from sqlalchemy import text
 from sqlmodel import Session, select
 
@@ -25,9 +26,6 @@ def _get_service(name: str) -> Service:
     """Helper to fetch service from DB."""
     with Session(engine) as session:
         return session.exec(select(Service).where(Service.name == name)).one()
-
-
-from unittest.mock import MagicMock, patch
 
 
 def test_restart_service_happy_path():

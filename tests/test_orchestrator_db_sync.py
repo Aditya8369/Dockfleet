@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import DockFleetConfig, load_config
@@ -29,9 +29,9 @@ def test_orchestrator_updates_db_status(tmp_path):
         assert len(services) > 0
 
     orch = Orchestrator(config)
-    with patch.object(orch.docker, "run_container") as mock_run, patch.object(
+    with patch.object(orch.docker, "run_container"), patch.object(
         orch.docker, "stop_container"
-    ) as mock_stop, patch.object(orch.docker, "remove_container") as mock_rm, patch.object(
+    ), patch.object(orch.docker, "remove_container"), patch.object(
         orch.docker, "create_network"
     ):
         orch.up()

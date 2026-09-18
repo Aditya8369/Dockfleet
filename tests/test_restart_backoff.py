@@ -236,6 +236,8 @@ def test_invalid_restart_configuration_values(field, value) -> None:
             restart="always",
             **{field: value},
         )
+
+
 def test_failed_restart_counts_toward_restart_limit(monkeypatch) -> None:
     config = _build_config(max_restarts=1)
 

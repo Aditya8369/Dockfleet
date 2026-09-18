@@ -1,7 +1,13 @@
 from sqlalchemy import text
 from sqlmodel import Session, select
 
-from dockfleet.health.models import ContainerStatus, HealthStatus, Service, engine, init_db
+from dockfleet.health.models import (
+    ContainerStatus,
+    HealthStatus,
+    Service,
+    engine,
+    init_db,
+)
 from dockfleet.health.status import (
     mark_restart_successful,
     needs_restart,

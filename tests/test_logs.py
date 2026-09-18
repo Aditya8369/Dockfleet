@@ -15,7 +15,8 @@ def test_get_container_name():
 # Pre-existing tests for stream_logs (sync generator)
 # -------------------------------------------------------
 
-@patch('dockfleet.core.logs.subprocess.run')
+
+@patch("dockfleet.core.logs.subprocess.run")
 def test_stream_logs_container_missing(mock_run):
     """Container not found → error list."""
     mock_run.return_value = MagicMock(returncode=0, stdout="")
@@ -25,7 +26,7 @@ def test_stream_logs_container_missing(mock_run):
     mock_run.assert_called_once()
 
 
-@patch('dockfleet.core.logs.subprocess.run')
+@patch("dockfleet.core.logs.subprocess.run")
 def test_stream_logs_docker_check_fails(mock_run):
     """Docker ps fails → error list."""
     mock_run.side_effect = Exception("Docker error")
@@ -34,18 +35,20 @@ def test_stream_logs_docker_check_fails(mock_run):
     assert len(events) == 0
 
 
-@patch('dockfleet.core.logs.subprocess.Popen')
-@patch('dockfleet.core.logs.subprocess.run')
+@patch("dockfleet.core.logs.subprocess.Popen")
+@patch("dockfleet.core.logs.subprocess.run")
 def test_stream_logs_streaming(mock_run, mock_popen):
     """Container exists → streams log lines."""
     mock_run.side_effect = [
         MagicMock(returncode=0, stdout="dockfleet_test\n"),
     ]
 
-    mock_popen.return_value.stdout = iter([
-        "log line 1\n",
-        "log line 2\n",
-    ])
+    mock_popen.return_value.stdout = iter(
+        [
+            "log line 1\n",
+            "log line 2\n",
+        ]
+    )
     mock_popen.return_value.terminate = MagicMock()
     mock_popen.return_value.wait = MagicMock(return_value=0)
 
@@ -57,9 +60,10 @@ def test_stream_logs_streaming(mock_run, mock_popen):
 # Tests for stream_container_logs exception handling
 # -------------------------------------------------------
 
+
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_container_not_found_fails_fast(mock_popen, mock_store):
     """Container doesn't exist -> fails fast, does not consume all retries."""
     mock_proc = MagicMock()
@@ -84,8 +88,8 @@ async def test_container_not_found_fails_fast(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_docker_binary_missing_fails_fast(mock_popen, mock_store):
     """Docker binary not found -> fails fast with appropriate message."""
     mock_popen.side_effect = FileNotFoundError("docker binary not found")
@@ -101,8 +105,8 @@ async def test_docker_binary_missing_fails_fast(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_permission_denied_fails_fast(mock_popen, mock_store):
     """Permission denied -> fails fast."""
     mock_popen.side_effect = PermissionError("[Errno 13] Permission denied")
@@ -117,8 +121,8 @@ async def test_permission_denied_fails_fast(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_transient_failure_recovers(mock_popen, mock_store):
     """Transient failure that resolves -> recovers and streams."""
     call_count = 0
@@ -157,8 +161,8 @@ async def test_transient_failure_recovers(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_all_exception_paths_produce_logs(mock_popen, mock_store, caplog):
     """Every exception path produces a log entry."""
     import logging
@@ -186,8 +190,8 @@ async def test_all_exception_paths_produce_logs(mock_popen, mock_store, caplog):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_happy_path_unaffected(mock_popen, mock_store):
     """Successful streaming works as before - no regression."""
     mock_proc = MagicMock()
@@ -214,8 +218,8 @@ async def test_happy_path_unaffected(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_max_retries_exhausted_message(mock_popen, mock_store):
     """Max retries exhausted -> appropriate message, transient error retried."""
     call_count = 0
@@ -237,15 +241,13 @@ async def test_max_retries_exhausted_message(mock_popen, mock_store):
     async for event in stream_container_logs("api"):
         events.append(event)
 
-    assert any(
-        "max retries" in e.lower() or "exhausted" in e.lower() for e in events
-    )
+    assert any("max retries" in e.lower() or "exhausted" in e.lower() for e in events)
     assert mock_popen.call_count == 20
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_proc_none_cleanup_safety(mock_popen, mock_store):
     """Exception before Popen succeeds -> cleanup handles None proc safely."""
     mock_popen.side_effect = Exception("Unexpected error")
@@ -259,8 +261,8 @@ async def test_proc_none_cleanup_safety(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_no_such_image_fails_fast(mock_popen, mock_store):
     """No such image pattern in stderr -> permanent failure."""
     mock_proc = MagicMock()
@@ -284,8 +286,8 @@ async def test_no_such_image_fails_fast(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_permission_denied_in_stderr_fails_fast(mock_popen, mock_store):
     """Permission denied in stderr -> fails fast without retrying 20 times."""
     mock_proc = MagicMock()
@@ -309,8 +311,8 @@ async def test_permission_denied_in_stderr_fails_fast(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_unknown_non_zero_exit_fails_fast(mock_popen, mock_store):
     """Unknown non-zero exit code -> generic diagnostic, fails fast."""
     mock_proc = MagicMock()
@@ -329,13 +331,16 @@ async def test_unknown_non_zero_exit_fails_fast(mock_popen, mock_store):
         events.append(event)
 
     assert len(events) >= 1
-    assert "error streaming logs" in events[-1].lower() or "exited with code 1" in events[-1].lower()
+    assert (
+        "error streaming logs" in events[-1].lower()
+        or "exited with code 1" in events[-1].lower()
+    )
     mock_popen.assert_called_once()
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_db_persistence_failure_isolated(mock_popen, mock_store):
     """Database persistence exception -> stream continues, error is logged."""
     mock_store.side_effect = Exception("Database connection failure")
@@ -361,8 +366,8 @@ async def test_db_persistence_failure_isolated(mock_popen, mock_store):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_cleanup_failure_logged(mock_popen, mock_store, caplog):
     """Cleanup failure when terminating/killing process -> logs warning with exc_info."""
     import logging
@@ -386,8 +391,8 @@ async def test_cleanup_failure_logged(mock_popen, mock_store, caplog):
 
 
 @pytest.mark.asyncio
-@patch('dockfleet.core.logs.store_log_line_in_db')
-@patch('dockfleet.core.logs.subprocess.Popen')
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
 async def test_reader_exception_propagation(mock_popen, mock_store, caplog):
     """Exception during stdout readline -> logs exception with stack trace and yields error notification."""
     import logging

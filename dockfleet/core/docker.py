@@ -61,6 +61,7 @@ class DockerManager:
 
     def get_containers_json(self) -> list:
         import json
+
         result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{json .}}"],
             capture_output=True,
@@ -75,4 +76,3 @@ class DockerManager:
                 except Exception:
                     pass
         return containers
-

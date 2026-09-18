@@ -1,12 +1,7 @@
 import logging
 import re
 import subprocess
-import logging
-import re
-import subprocess
 import threading
-from datetime import datetime
-from typing import Optional
 
 import time
 
@@ -243,7 +238,6 @@ class Orchestrator:
         """Return the standard Docker container name for a service."""
         return f"dockfleet_{service}"
 
-
     def start_service(self, name, svc) -> bool:
         """
         Start a container for the given service definition and update database status.
@@ -313,7 +307,7 @@ class Orchestrator:
             except Exception as e:
                 if "No such" not in str(e) and "not found" not in str(e).lower():
                     raise e
-            
+
             # Best-effort remove
             try:
                 self.docker.remove_container(container_name)
@@ -342,9 +336,13 @@ class Orchestrator:
                     db_svc.last_failure_reason = f"auto-restart failed: {reason}"
                     session.add(db_svc)
                     session.commit()
-                    logger.warning("Marked restart failed for %s: %s", service_name, reason)
+                    logger.warning(
+                        "Marked restart failed for %s: %s", service_name, reason
+                    )
         except Exception as exc:
-            logger.error("Failed to update DB for failed restart %s: %s", service_name, exc)
+            logger.error(
+                "Failed to update DB for failed restart %s: %s", service_name, exc
+            )
 
     def restart_service(
         self,
@@ -385,7 +383,9 @@ class Orchestrator:
         # Concurrency guard: thread check
         with self._restart_lock:
             if service_name in self._active_restarts:
-                logger.warning("Restart already in progress for service %s", service_name)
+                logger.warning(
+                    "Restart already in progress for service %s", service_name
+                )
                 return None if detailed else False
             self._active_restarts.add(service_name)
 
@@ -400,7 +400,7 @@ class Orchestrator:
                     session.add(db_svc)
                     session.commit()
 
-# Optional exponential backoff
+            # Optional exponential backoff
             if backoff_attempt > 0:
                 delay = min(2**backoff_attempt, 32)
                 logger.info(
@@ -431,9 +431,11 @@ class Orchestrator:
             # Try to start a fresh container
             try:
                 if self.start_service(service_name, svc) is False:
-                    self._mark_restart_failed(service_name, "start_service returned False")
+                    self._mark_restart_failed(
+                        service_name, "start_service returned False"
+                    )
                     return False
-                    
+
                 self._increment_restart_count(service_name)
                 logger.info("%s restarted (count updated)", service_name)
                 return True
@@ -534,7 +536,9 @@ class Orchestrator:
             return
 
         if not success:
-            logger.info("restart_service skipped or already in progress for %s", service_name)
+            logger.info(
+                "restart_service skipped or already in progress for %s", service_name
+            )
             return
 
         logger.info("%s auto-restarted", service_name)
@@ -615,7 +619,6 @@ class Orchestrator:
 
         print("All services started.")
 
-   
     def down(self):
         """Stop and remove all services. Raises an exception if any service fails to stop."""
         print("Stopping services...\n")
@@ -628,9 +631,8 @@ class Orchestrator:
         if failed:
             raise RuntimeError(f"Failed to stop services: {failed}")
 
-
     def get_ps_data(self) -> list[dict]:
-        import json
+
         raw_containers = self.docker.get_containers_json()
 
         results = []
@@ -679,6 +681,7 @@ class Orchestrator:
         """List currently running containers managed by DockFleet."""
         if json_output:
             import json
+
             data = self.get_ps_data()
             print(json.dumps(data, indent=2))
         else:
