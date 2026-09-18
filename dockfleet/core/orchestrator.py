@@ -676,6 +676,7 @@ class Orchestrator:
         return results
 
     def ps(self, json_output: bool = False):
+        """List currently running containers managed by DockFleet."""
         if json_output:
             import json
             data = self.get_ps_data()
@@ -683,11 +684,6 @@ class Orchestrator:
         else:
             print("Running containers:\n")
             self.docker.list_containers()
-
-    def ps(self):
-        """List currently running containers managed by DockFleet."""
-        print("Running containers:\n")
-        self.docker.list_containers()
     def restart(self):
         """
         Gracefully restart all services managed by DockFleet. This is a convenience wrapper around down() and up().
