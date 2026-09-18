@@ -123,6 +123,16 @@ After setting up the development environment, you can run DockFleet using the ex
 
 #### <u>CLI Commands:</u>
 
+##### Check version
+
+```
+dockfleet --version
+```
+
+Displays the installed DockFleet version.
+
+---
+
 ##### Validate configuration
 
 ```
