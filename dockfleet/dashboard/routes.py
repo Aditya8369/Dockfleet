@@ -268,11 +268,15 @@ def restart_service(name: str):
 def stop_service(name: str):
     """Trigger a manual container stop for the given service."""
     container = f"dockfleet_{name}"
-    result = subprocess.run(["docker", "stop", container], capture_output=True)
-    ok = result.returncode == 0
+    try:
+        result = subprocess.run(["docker", "stop", container], capture_output=True)
+        ok = result.returncode == 0
+    except Exception:
+        ok = False
     if ok:
         record_manual_stop(name)
-    return {"message": f"{name} stopped", "ok": ok}
+        return {"message": f"{name} stopped", "ok": True}
+    return {"message": f"Failed to stop {name}", "ok": False}
 
 
 # ------------------------------------------------

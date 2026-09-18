@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
 from dockfleet.core.orchestrator import mark_restart_failed, restart_service
 from dockfleet.health.checker import HealthChecker
-from dockfleet.health.models import HealthStatus, Service, engine
+from dockfleet.health.models import Service, engine
 from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.status import (
     mark_restart_successful,

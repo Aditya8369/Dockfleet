@@ -1,12 +1,7 @@
 import logging
 import re
 import subprocess
-import logging
-import re
-import subprocess
 import threading
-from datetime import datetime
-from typing import Optional
 
 import time
 
@@ -637,7 +632,6 @@ class Orchestrator:
             raise RuntimeError(f"Failed to stop services: {failed}")
 
     def get_ps_data(self) -> list[dict]:
-        import json
 
         raw_containers = self.docker.get_containers_json()
 
@@ -684,6 +678,7 @@ class Orchestrator:
         return results
 
     def ps(self, json_output: bool = False):
+        """List currently running containers managed by DockFleet."""
         if json_output:
             import json
 
@@ -692,11 +687,6 @@ class Orchestrator:
         else:
             print("Running containers:\n")
             self.docker.list_containers()
-
-    def ps(self):
-        """List currently running containers managed by DockFleet."""
-        print("Running containers:\n")
-        self.docker.list_containers()
 
     def restart(self):
         """

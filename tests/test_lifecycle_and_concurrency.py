@@ -371,7 +371,6 @@ def test_restart_guard_released_after_exception():
     orch = Orchestrator(config)
 
     # Force an unexpected exception during the container stop phase
-    import subprocess
     import pytest
 
     def mock_subprocess_run(*args, **kwargs):
