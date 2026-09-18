@@ -41,9 +41,7 @@ def test_update_service_health_changes_db_fields(tmp_path):
     )
 
     with Session(engine) as session:
-        svc = session.exec(
-            select(Service).where(Service.name == service_name)
-        ).one()
+        svc = session.exec(select(Service).where(Service.name == service_name)).one()
 
         assert svc.status == "running"
         assert svc.health_status == "unhealthy"

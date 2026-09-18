@@ -46,6 +46,7 @@ if sys.platform == "win32":
             msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
         except OSError:
             pass
+
 else:
     import fcntl
 
@@ -65,6 +66,7 @@ else:
 
 
 # SchedulerLock ----------------------------------------------------------------
+
 
 class SchedulerLock:
     """
@@ -254,8 +256,7 @@ class SchedulerLock:
                 self._fd.close()
                 self._fd = None
                 raise RuntimeError(
-                    "Could not acquire scheduler lock even after "
-                    "stale-lock recovery"
+                    "Could not acquire scheduler lock even after " "stale-lock recovery"
                 )
             self._acquired = True
             self._write_pid_file()

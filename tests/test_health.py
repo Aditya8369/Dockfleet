@@ -40,7 +40,9 @@ def setup_db():
 
 def test_store_log_line_persists_datetime_instance():
     """Assert store_log_line() persists a datetime instance (not str) to LogEvent.created_at."""
-    store_log_line("api_test", "test line datetime persistence", level="INFO", source="test")
+    store_log_line(
+        "api_test", "test line datetime persistence", level="INFO", source="test"
+    )
 
     with Session(engine) as session:
         event = session.exec(

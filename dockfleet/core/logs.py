@@ -64,10 +64,14 @@ async def stream_container_logs(service_name: str):
                                 enqueue_item(("stdout", line))
                         enqueue_item(("stdout", None))
                     except (OSError, ValueError) as e:
-                        logger.exception("Stdout reader expected exception for %s", container)
+                        logger.exception(
+                            "Stdout reader expected exception for %s", container
+                        )
                         enqueue_item(("stdout_error", e))
                     except Exception as e:
-                        logger.exception("Stdout reader unexpected exception for %s", container)
+                        logger.exception(
+                            "Stdout reader unexpected exception for %s", container
+                        )
                         enqueue_item(("stdout_error", e))
 
                 def read_stderr():
@@ -81,10 +85,14 @@ async def stream_container_logs(service_name: str):
                                 enqueue_item(("stderr", line))
                         enqueue_item(("stderr", None))
                     except (OSError, ValueError) as e:
-                        logger.exception("Stderr reader expected exception for %s", container)
+                        logger.exception(
+                            "Stderr reader expected exception for %s", container
+                        )
                         enqueue_item(("stderr_error", e))
                     except Exception as e:
-                        logger.exception("Stderr reader unexpected exception for %s", container)
+                        logger.exception(
+                            "Stderr reader unexpected exception for %s", container
+                        )
                         enqueue_item(("stderr_error", e))
 
                 t_stdout = loop.run_in_executor(None, read_stdout)
@@ -117,7 +125,9 @@ async def stream_container_logs(service_name: str):
                             )
                         except Exception:
                             logger.exception(
-                                "Failed to persist %s log line for %s", stream_type, service_name
+                                "Failed to persist %s log line for %s",
+                                stream_type,
+                                service_name,
                             )
 
                         if stream_type == "stderr":
@@ -150,12 +160,24 @@ async def stream_container_logs(service_name: str):
 
                     stderr_lower = stderr_output.lower()
 
-                    if "no such container" in stderr_lower or "no such image" in stderr_lower:
-                        logger.error("Container %s does not exist: %s", container, stderr_output)
+                    if (
+                        "no such container" in stderr_lower
+                        or "no such image" in stderr_lower
+                    ):
+                        logger.error(
+                            "Container %s does not exist: %s", container, stderr_output
+                        )
                         yield f"data: [dockfleet] Container '{container}' not found\n\n"
                         return
-                    elif "permission denied" in stderr_lower or "access is denied" in stderr_lower:
-                        logger.error("Permission denied accessing logs for %s: %s", container, stderr_output)
+                    elif (
+                        "permission denied" in stderr_lower
+                        or "access is denied" in stderr_lower
+                    ):
+                        logger.error(
+                            "Permission denied accessing logs for %s: %s",
+                            container,
+                            stderr_output,
+                        )
                         yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
                         return
                     elif (
@@ -183,11 +205,15 @@ async def stream_container_logs(service_name: str):
                     return
 
             except FileNotFoundError:
-                logger.error("Docker binary not found. Cannot stream logs for %s", container)
+                logger.error(
+                    "Docker binary not found. Cannot stream logs for %s", container
+                )
                 yield "data: [dockfleet] Docker is not installed or not in PATH\n\n"
                 return
             except PermissionError as e:
-                logger.error("Permission denied accessing logs for %s: %s", container, e)
+                logger.error(
+                    "Permission denied accessing logs for %s: %s", container, e
+                )
                 yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
                 return
             except Exception as e:
@@ -197,8 +223,12 @@ async def stream_container_logs(service_name: str):
                     logger.error("Container %s not found: %s", container, e)
                     yield f"data: [dockfleet] Container '{container}' not found\n\n"
                     return
-                elif "permission denied" in error_msg or "access is denied" in error_msg:
-                    logger.error("Permission denied accessing logs for %s: %s", container, e)
+                elif (
+                    "permission denied" in error_msg or "access is denied" in error_msg
+                ):
+                    logger.error(
+                        "Permission denied accessing logs for %s: %s", container, e
+                    )
                     yield f"data: [dockfleet] Permission denied accessing logs for '{container}'\n\n"
                     return
                 elif "connection refused" in error_msg or "cannot connect" in error_msg:
@@ -221,6 +251,7 @@ async def stream_container_logs(service_name: str):
             finally:
                 stop_readers.set()
                 if proc is not None:
+
                     def cleanup():
                         """Terminate and kill subprocess safely."""
                         try:

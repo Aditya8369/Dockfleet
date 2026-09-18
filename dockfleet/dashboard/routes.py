@@ -382,11 +382,16 @@ def system_status():
 
     total = len(services)
     running = sum(1 for s in services if s["status"] == ContainerStatus.RUNNING.value)
-    restarting = sum(1 for s in services if s["status"] == HealthStatus.RESTARTING.value)
+    restarting = sum(
+        1 for s in services if s["status"] == HealthStatus.RESTARTING.value
+    )
     stopped = sum(1 for s in services if s["status"] == ContainerStatus.STOPPED.value)
 
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        1
+        for s in services
+        if s.get("health_status")
+        in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
 
     return {
@@ -404,6 +409,7 @@ def system_status():
 @router.get("/logs/stream/{service}")
 async def stream_logs(service: str):
     """Server-Sent Events (SSE) endpoint to stream real-time container log lines."""
+
     async def event_stream():
         try:
             async for line in stream_container_logs(service):
@@ -445,15 +451,25 @@ def get_metrics():
     services = get_services()
 
     total = len(services)
-    running = sum(1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value)
+    running = sum(
+        1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value
+    )
     unhealthy = sum(
-        1 for s in services if s.get("health_status") in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        1
+        for s in services
+        if s.get("health_status")
+        in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
     stopped = sum(
         1
         for s in services
         if s.get("health_status")
-        not in (HealthStatus.HEALTHY.value, HealthStatus.RESTARTING.value, HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
+        not in (
+            HealthStatus.HEALTHY.value,
+            HealthStatus.RESTARTING.value,
+            HealthStatus.UNHEALTHY.value,
+            HealthStatus.CRASHED.value,
+        )
     )
     total_restarts = sum(s.get("restart_count", 0) for s in services)
 

@@ -5,7 +5,13 @@ from sqlmodel import Session, select
 
 from dockfleet.cli.config import DockFleetConfig, RestartPolicy, ServiceConfig
 from dockfleet.core.orchestrator import Orchestrator, reset_orchestrator
-from dockfleet.health.models import ContainerStatus, HealthStatus, Service, engine, init_db
+from dockfleet.health.models import (
+    ContainerStatus,
+    HealthStatus,
+    Service,
+    engine,
+    init_db,
+)
 from dockfleet.health.status import (
     mark_restart_successful,
     needs_restart,
@@ -70,7 +76,7 @@ def test_full_lifecycle_healthy_crashed_restarting_healthy():
         }
     )
     orch = Orchestrator(config)
-    
+
     # Verify restart_service sets state RESTARTING during run
     state_in_progress = None
 
@@ -245,7 +251,13 @@ def test_json_wire_serialization_emits_clean_strings():
     matching = [s for s in services if s["name"] == "serial-test"]
     assert len(matching) == 1
     assert matching[0]["status"] in ("running", "stopped", "unknown")
-    assert matching[0]["health_status"] in ("healthy", "unhealthy", "crashed", "restarting", "stopped")
+    assert matching[0]["health_status"] in (
+        "healthy",
+        "unhealthy",
+        "crashed",
+        "restarting",
+        "stopped",
+    )
     assert isinstance(matching[0]["status"], str)
     assert isinstance(matching[0]["health_status"], str)
 
@@ -622,8 +634,14 @@ def test_malformed_legacy_db_data_resilience(caplog):
             assert by_name["empty-svc-2"].health_status == HealthStatus.HEALTHY
 
     # Verify warning log was emitted for corrupted values
-    assert any("Unrecognized ContainerStatus value 'invalid_status_xyz'" in r.message for r in caplog.records)
-    assert any("Unrecognized HealthStatus value 'unrecognized_health_abc'" in r.message for r in caplog.records)
+    assert any(
+        "Unrecognized ContainerStatus value 'invalid_status_xyz'" in r.message
+        for r in caplog.records
+    )
+    assert any(
+        "Unrecognized HealthStatus value 'unrecognized_health_abc'" in r.message
+        for r in caplog.records
+    )
     assert any("Empty or null" in r.message for r in caplog.records)
 
     # Dashboard listing API should also return all 3 without 500 error

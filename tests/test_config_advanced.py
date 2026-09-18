@@ -89,6 +89,8 @@ def test_invalid_environment():
 
     with pytest.raises(ValueError):
         DockFleetConfig(**config)
+
+
 def test_valid_self_healing_controls():
     config = {
         "services": {

@@ -31,7 +31,9 @@ def test_orchestrator_updates_db_status(tmp_path):
     orch = Orchestrator(config)
     with patch.object(orch.docker, "run_container") as mock_run, patch.object(
         orch.docker, "stop_container"
-    ) as mock_stop, patch.object(orch.docker, "remove_container") as mock_rm, patch.object(
+    ) as mock_stop, patch.object(
+        orch.docker, "remove_container"
+    ) as mock_rm, patch.object(
         orch.docker, "create_network"
     ):
         orch.up()

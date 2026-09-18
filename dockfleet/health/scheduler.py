@@ -56,9 +56,7 @@ class HealthScheduler:
         # locking; ``None`` disables it (e.g. in tests that manage the
         # scheduler manually or in single-pass ``--once`` mode).
         if project_dir is not None:
-            self._lock: Optional[SchedulerLock] = SchedulerLock(
-                Path(project_dir)
-            )
+            self._lock: Optional[SchedulerLock] = SchedulerLock(Path(project_dir))
         else:
             self._lock = None
 
@@ -247,7 +245,7 @@ class HealthScheduler:
 
         if backoff_seconds is not None:
             multiplier = backoff_multiplier if backoff_multiplier is not None else 1.0
-            delay = backoff_seconds * (multiplier ** restart_attempts)
+            delay = backoff_seconds * (multiplier**restart_attempts)
 
             now = time.monotonic()
             next_restart_at = self._next_restart_at.get(name)
@@ -300,8 +298,7 @@ class HealthScheduler:
                 self._next_restart_at.pop(name, None)
 
                 self._logger.warning(
-                    "HealthScheduler: restart failed for %s "
-                    "(attempt=%d)",
+                    "HealthScheduler: restart failed for %s " "(attempt=%d)",
                     svc.name,
                     restart_attempts,
                 )

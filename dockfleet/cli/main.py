@@ -150,6 +150,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
     except Exception as e:
         typer.echo(f"Error stopping services: {e}")
         raise typer.Exit(code=1)
+
+
 # ------------------------------------------------
 # restart
 # ------------------------------------------------
@@ -167,6 +169,7 @@ def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
     except Exception as e:
         typer.echo(f"Error restarting services: {e}")
         raise typer.Exit(code=1)
+
 
 # ------------------------------------------------
 # ps
@@ -196,7 +199,6 @@ def ps(
         else:
             typer.echo(f"Error listing containers: {e}")
         raise typer.Exit(code=1)
-
 
 
 # ------------------------------------------------

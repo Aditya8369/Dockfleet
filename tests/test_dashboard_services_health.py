@@ -50,12 +50,38 @@ def test_get_services_preserves_unhealthy_status(monkeypatch):
     monkeypatch.setattr("dockfleet.dashboard.services.engine", test_engine)
 
     # Mock docker ps returning containers in Up state
-    docker_ps_output = "\n".join([
-        json.dumps({"Names": "dockfleet_web_unhealthy", "Status": "Up 5 minutes", "RunningFor": "5 minutes"}),
-        json.dumps({"Names": "dockfleet_web_crashed", "Status": "Up 2 minutes", "RunningFor": "2 minutes"}),
-        json.dumps({"Names": "dockfleet_web_restarting", "Status": "Up 10 seconds", "RunningFor": "10 seconds"}),
-        json.dumps({"Names": "dockfleet_web_healthy", "Status": "Up 10 minutes", "RunningFor": "10 minutes"}),
-    ])
+    docker_ps_output = "\n".join(
+        [
+            json.dumps(
+                {
+                    "Names": "dockfleet_web_unhealthy",
+                    "Status": "Up 5 minutes",
+                    "RunningFor": "5 minutes",
+                }
+            ),
+            json.dumps(
+                {
+                    "Names": "dockfleet_web_crashed",
+                    "Status": "Up 2 minutes",
+                    "RunningFor": "2 minutes",
+                }
+            ),
+            json.dumps(
+                {
+                    "Names": "dockfleet_web_restarting",
+                    "Status": "Up 10 seconds",
+                    "RunningFor": "10 seconds",
+                }
+            ),
+            json.dumps(
+                {
+                    "Names": "dockfleet_web_healthy",
+                    "Status": "Up 10 minutes",
+                    "RunningFor": "10 minutes",
+                }
+            ),
+        ]
+    )
 
     def mock_subprocess_run(cmd, *args, **kwargs):
         mock_res = MagicMock()
@@ -70,14 +96,24 @@ def test_get_services_preserves_unhealthy_status(monkeypatch):
 
     services_by_name = {s["name"]: s for s in services}
 
-    assert services_by_name["web_unhealthy"]["health_status"] == HealthStatus.UNHEALTHY.value
+    assert (
+        services_by_name["web_unhealthy"]["health_status"]
+        == HealthStatus.UNHEALTHY.value
+    )
     assert services_by_name["web_unhealthy"]["status"] == ContainerStatus.RUNNING.value
 
-    assert services_by_name["web_crashed"]["health_status"] == HealthStatus.CRASHED.value
+    assert (
+        services_by_name["web_crashed"]["health_status"] == HealthStatus.CRASHED.value
+    )
     assert services_by_name["web_crashed"]["status"] == ContainerStatus.RUNNING.value
 
-    assert services_by_name["web_restarting"]["health_status"] == HealthStatus.RESTARTING.value
+    assert (
+        services_by_name["web_restarting"]["health_status"]
+        == HealthStatus.RESTARTING.value
+    )
     assert services_by_name["web_restarting"]["status"] == ContainerStatus.RUNNING.value
 
-    assert services_by_name["web_healthy"]["health_status"] == HealthStatus.HEALTHY.value
+    assert (
+        services_by_name["web_healthy"]["health_status"] == HealthStatus.HEALTHY.value
+    )
     assert services_by_name["web_healthy"]["status"] == ContainerStatus.RUNNING.value

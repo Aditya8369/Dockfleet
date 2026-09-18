@@ -51,14 +51,16 @@ def _update_status(
 
         svc.status = (
             ContainerStatus(new_status)
-            if isinstance(new_status, str) and not isinstance(new_status, ContainerStatus)
+            if isinstance(new_status, str)
+            and not isinstance(new_status, ContainerStatus)
             else new_status
         )
 
         if new_health is not None:
             svc.health_status = (
                 HealthStatus(new_health)
-                if isinstance(new_health, str) and not isinstance(new_health, HealthStatus)
+                if isinstance(new_health, str)
+                and not isinstance(new_health, HealthStatus)
                 else new_health
             )
 
@@ -145,7 +147,11 @@ def record_restart_event(service: Service, reason: str) -> None:
         service_name=service.name,
         restarted_at=datetime.now(timezone.utc),
         reason=reason,
-        previous_status=service.status.value if isinstance(service.status, ContainerStatus) else service.status,
+        previous_status=(
+            service.status.value
+            if isinstance(service.status, ContainerStatus)
+            else service.status
+        ),
         new_status=ContainerStatus.RUNNING.value,  # intended post-restart status
     )
 
@@ -194,7 +200,9 @@ def record_manual_restart_event(service_name: str) -> None:
             print(f"[manual-restart] Service '{service_name}' not found in DB")
             return
 
-        previous_status = svc.status.value if isinstance(svc.status, ContainerStatus) else svc.status
+        previous_status = (
+            svc.status.value if isinstance(svc.status, ContainerStatus) else svc.status
+        )
         svc.restart_count = (svc.restart_count or 0) + 1
         svc.status = ContainerStatus.RUNNING
         svc.health_status = HealthStatus.HEALTHY
