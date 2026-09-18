@@ -2,6 +2,7 @@ import logging
 import subprocess
 import sys
 import time
+import importlib.metadata
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,29 @@ from dockfleet.health.status import update_service_health
 app = typer.Typer(help="DockFleet CLI - Manage Docker services from YAML configuration")
 validate_app = typer.Typer()
 app.add_typer(validate_app, name="validate")
+
+
+def version_callback(value: bool):
+    if value:
+        try:
+            version = importlib.metadata.version("dockfleet")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        typer.echo(f"DockFleet version {version}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        callback=version_callback,
+        is_eager=True,
+        help="Show the installed DockFleet version and exit.",
+    ),
+):
+    pass
 
 # ------------------------------------------------
 # Logging setup for health scheduler
