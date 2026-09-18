@@ -39,10 +39,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def to_ist_iso(dt: datetime | None) -> str | None:
-    """Convert naive UTC datetime to IST ISO string."""
+    """Convert UTC datetime to IST ISO string."""
     if dt is None:
         return None
-    dt_utc = dt.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt_utc = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt_utc = dt.astimezone(timezone.utc)
     dt_ist = dt_utc.astimezone(IST)
     return dt_ist.isoformat()
 
@@ -303,7 +306,7 @@ def list_logs(
 @router.get("/logs/explore/{service_name}")
 async def explore_logs(service_name: str, days: int = 1):
     """Retrieve time-windowed log records for a service."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     with Session(engine) as session:
         statement = (
@@ -454,12 +457,12 @@ def get_metrics():
     )
     total_restarts = sum(s.get("restart_count", 0) for s in services)
 
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
     with Session(engine) as session:
         stmt = select(RestartEvent).where(RestartEvent.restarted_at >= since)
         health_failures = len(session.exec(stmt).all())
 
-    collected_utc = datetime.utcnow()
+    collected_utc = datetime.now(timezone.utc)
     return MetricsSummary(
         total_services=total,
         running_services=running,
@@ -492,7 +495,7 @@ def analytics_summary(
     ),
 ):
     """Retrieve overall crash analytics summary within a time window."""
-    since = datetime.utcnow() - timedelta(hours=window_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=window_hours)
     base = get_most_unstable_services(limit=limit, window_hours=window_hours)
 
     with Session(engine) as session:
@@ -585,7 +588,7 @@ def analytics_restart_history(
     since_hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
 ):
     """Retrieve chronologically ordered restart events for a service."""
-    since = datetime.utcnow() - timedelta(hours=since_hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     history = get_restart_history(service_name, since=since)
 
     return [
