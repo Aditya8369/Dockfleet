@@ -23,15 +23,6 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
             name = svc.name
             container = f"dockfleet_{name}"
 
-            result = subprocess.run(
-                ["docker", "logs", "--tail", str(tail), container],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                # container may not exist or be stopped; skip
-                continue
-
             # latest log timestamp we already have for this service
             latest_ts: datetime | None = session.exec(
                 select(LogEvent.created_at)
@@ -39,6 +30,22 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                 .order_by(LogEvent.created_at.desc())
                 .limit(1)
             ).one_or_none()
+
+            cmd = ["docker", "logs"]
+            if latest_ts is not None:
+                cmd.extend(["--since", latest_ts.isoformat()])
+            else:
+                cmd.extend(["--tail", str(tail)])
+            cmd.append(container)
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                # container may not exist or be stopped; skip
+                continue
 
             for line in result.stdout.splitlines():
                 line = line.rstrip()
