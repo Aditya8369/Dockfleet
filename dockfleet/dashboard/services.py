@@ -84,9 +84,15 @@ def get_services() -> list[dict]:
             services[service_name]["status"] = status
             services[service_name]["uptime"] = container.get("RunningFor")
 
-            # sync health_status with real state, but preserve "crashed"
+            # sync health_status with real state, but preserve failing or restarting states
             if status == ContainerStatus.RUNNING.value:
-                services[service_name]["health_status"] = HealthStatus.HEALTHY.value
+                # Preserve failing or restarting states from health checks
+                if services[service_name]["health_status"] not in (
+                    HealthStatus.UNHEALTHY.value,
+                    HealthStatus.CRASHED.value,
+                    HealthStatus.RESTARTING.value,
+                ):
+                    services[service_name]["health_status"] = HealthStatus.HEALTHY.value
             elif status == HealthStatus.RESTARTING.value:
                 services[service_name]["health_status"] = HealthStatus.RESTARTING.value
             elif status == ContainerStatus.STOPPED.value:
