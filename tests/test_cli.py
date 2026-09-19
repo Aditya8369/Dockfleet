@@ -69,3 +69,40 @@ def test_cli_version(mock_version):
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert "DockFleet version 1.2.3" in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_success(mock_run):
+    """Test that logs command outputs stdout and exits with code 0 on success."""
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "2026-09-19 INFO Application started\n"
+    mock_run.return_value.stderr = ""
+
+    result = runner.invoke(app, ["logs", "api"])
+    assert result.exit_code == 0
+    assert "Application started" in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_missing_container_non_zero_exit(mock_run):
+    """Test that logs command displays stderr and exits with code 1 when docker logs fails."""
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = "Error response from daemon: No such container: dockfleet_non_existent\n"
+
+    result = runner.invoke(app, ["logs", "non_existent"])
+    assert result.exit_code == 1
+    assert "Error response from daemon: No such container: dockfleet_non_existent" in result.output
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_missing_container_empty_stderr_fallback(mock_run):
+    """Test that logs command displays fallback message when stderr is empty on failure."""
+    mock_run.return_value.returncode = 1
+    mock_run.return_value.stdout = ""
+    mock_run.return_value.stderr = ""
+
+    result = runner.invoke(app, ["logs", "non_existent"])
+    assert result.exit_code == 1
+    assert "Service 'non_existent' not found or container not running." in result.output
+

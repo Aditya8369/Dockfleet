@@ -244,15 +244,25 @@ def logs(
     try:
         if follow:
             typer.echo(f"Streaming logs for {service} (Ctrl+C to stop)\n")
-            subprocess.run(
+            result = subprocess.run(
                 ["docker", "logs", "-f", "--tail", str(lines), container_name]
             )
+            if result.returncode != 0:
+                raise typer.Exit(code=1)
         else:
             result = subprocess.run(
                 ["docker", "logs", "--tail", str(lines), container_name],
                 capture_output=True,
                 text=True,
             )
+            if result.returncode != 0:
+                err_msg = (
+                    result.stderr.strip()
+                    if result.stderr and result.stderr.strip()
+                    else f"Service '{service}' not found or container not running."
+                )
+                typer.echo(err_msg)
+                raise typer.Exit(code=1)
             typer.echo(result.stdout)
     except typer.Exit:
         raise
