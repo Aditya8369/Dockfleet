@@ -1,8 +1,11 @@
+import importlib.metadata
+import json
 import logging
+import os
+import signal
 import subprocess
 import sys
 import time
-import importlib.metadata
 from datetime import datetime
 from pathlib import Path
 
@@ -13,14 +16,59 @@ from dockfleet.cli.config import load_config
 from dockfleet.core.orchestrator import Orchestrator
 from dockfleet.health.logs import LogEvent
 from dockfleet.health.models import PROJECT_ROOT, engine
-
 from dockfleet.health.scheduler import HealthScheduler
+from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.seed import bootstrap_from_path
 from dockfleet.health.status import update_service_health
 
 app = typer.Typer(help="DockFleet CLI - Manage Docker services from YAML configuration")
 validate_app = typer.Typer()
 app.add_typer(validate_app, name="validate")
+
+
+def spawn_background_scheduler(config_path: Path | str) -> subprocess.Popen:
+    """
+    Launch `dockfleet self-heal <config_path>` as a detached background process.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "dockfleet.cli.main",
+        "self-heal",
+        str(config_path),
+    ]
+    kwargs: dict[str, object] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        # DETACHED_PROCESS (0x8) | CREATE_NEW_PROCESS_GROUP (0x200)
+        kwargs["creationflags"] = 0x00000008 | 0x00000200
+        kwargs["close_fds"] = True
+    else:
+        kwargs["start_new_session"] = True
+        kwargs["close_fds"] = True
+
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def stop_background_scheduler(project_dir: Path = PROJECT_ROOT) -> bool:
+    """
+    Attempt to stop a running background scheduler process by reading .scheduler.pid.
+    """
+    pid_file = Path(project_dir) / SchedulerLock.PID_FILENAME
+    if not pid_file.exists():
+        return False
+
+    try:
+        info = json.loads(pid_file.read_text(encoding="utf-8"))
+        pid = info.get("pid")
+        if pid and SchedulerLock._pid_is_running(pid):
+            os.kill(pid, signal.SIGTERM)
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def version_callback(value: bool):
@@ -107,19 +155,24 @@ def seed(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
 
 @app.command()
-def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
+def up(
+    path: Path = typer.Argument("examples/dockfleet.yaml"),
+    detach: bool = typer.Option(
+        True,
+        "--detach/--foreground",
+        "-d/-f",
+        help="Run health scheduler as a detached background process (default) or in foreground.",
+    ),
+):
     """
     Start all services and the health engine (self-healing mode).
 
     - Bootstraps health DB from YAML.
-    - Starts HealthScheduler in background (logs to dockfleet-health.log).
     - Starts services via Orchestrator.
-    - Returns immediately (no blocking loop, no log spam on stdout).
+    - Starts HealthScheduler in background detached process (or foreground).
+    - Logs go to dockfleet-health.log.
     """
     try:
-        # Configure scheduler logging once
-        setup_health_logging()
-
         # Load config
         config = load_config(path)
 
@@ -129,22 +182,39 @@ def up(path: Path = typer.Argument("examples/dockfleet.yaml")):
         typer.echo(f"Bootstrapping health DB from {path} ...")
         bootstrap_from_path(str(path))
 
-        # Start health scheduler in background (self-healing)
-        # Lock scope: PROJECT_ROOT (where dockfleet.db lives), not the config dir.
-        # This ensures CLI and dashboard always use the same lock regardless of
-        # where the YAML config file is located.
-        scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
-        scheduler.start()
-        typer.echo(
-            f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
-        )
-
         # Start orchestrator (non-blocking orchestration only)
         orch = Orchestrator(config)
         orch.up()
 
         typer.echo("Services started.")
-        typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+
+        if detach:
+            # Check if health scheduler is already running
+            lock = SchedulerLock(PROJECT_ROOT)
+            pid_info = lock._read_pid_file()
+            if pid_info and lock._pid_is_running(pid_info.get("pid", -1)):
+                typer.echo(
+                    f"Health scheduler is already running in background (PID {pid_info['pid']})."
+                )
+            else:
+                spawn_background_scheduler(str(path))
+                typer.echo(
+                    f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
+                )
+            typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+        else:
+            setup_health_logging()
+            scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
+            typer.echo(
+                f"Running health scheduler in foreground (Ctrl+C to stop); logs -> {HEALTH_LOG_PATH}\n"
+            )
+            scheduler.start()
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                typer.echo("\nStopping health scheduler...")
+                scheduler.stop()
     except typer.Exit:
         raise
     except Exception as e:
@@ -167,6 +237,9 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
         orch = Orchestrator(config)
         orch.down()
+
+        # Stop background scheduler if running
+        stop_background_scheduler(PROJECT_ROOT)
 
         typer.echo("\n✓ Services stopped")
     except typer.Exit:
@@ -448,6 +521,7 @@ def self_heal(
     Run DockFleet in continuous self-healing mode (health checks only).
     """
     try:
+        setup_health_logging()
         typer.echo("Starting DockFleet self-healing loop...\n")
 
         config = load_config(path)

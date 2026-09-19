@@ -8,7 +8,7 @@ from sqlmodel import Session, select
 from dockfleet.cli.config import DockFleetConfig, HealthCheckConfig
 from dockfleet.core.orchestrator import mark_restart_failed, restart_service
 from dockfleet.health.checker import HealthChecker
-from dockfleet.health.models import Service, engine
+from dockfleet.health.models import ContainerStatus, Service, engine
 from dockfleet.health.scheduler_lock import SchedulerLock
 from dockfleet.health.status import (
     mark_restart_successful,
@@ -145,6 +145,22 @@ class HealthScheduler:
 
                 # Skip services without healthcheck
                 if hc is None:
+                    continue
+
+                # Check if the service is currently marked as STOPPED in the database
+                with Session(engine) as session:
+                    svc_db = session.exec(
+                        select(Service).where(Service.name == name)
+                    ).one_or_none()
+
+                if svc_db is not None and svc_db.status in (
+                    ContainerStatus.STOPPED,
+                    ContainerStatus.STOPPED.value,
+                ):
+                    self._logger.debug(
+                        "HealthScheduler: %s is STOPPED, skipping health check",
+                        name,
+                    )
                     continue
 
                 try:

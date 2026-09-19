@@ -731,12 +731,14 @@ class Orchestrator:
                     service_name = container.replace("dockfleet_", "")
 
                     cpu_str, mem_usage, mem_perc = parts[1:4]
-                    cpu = (
-                        float(re.sub(r"[^\d.]", "", cpu_str))
-                        if cpu_str != "0.00%"
-                        else 0.0
+                    cleaned_cpu = re.sub(r"[^\d.]", "", cpu_str)
+                    cpu = float(cleaned_cpu) if cleaned_cpu else 0.0
+                    mem_parts = (
+                        [p.strip() for p in mem_usage.split("/")]
+                        if "/" in mem_usage
+                        else [mem_usage.strip(), "N/A"]
                     )
-                    mem_current, mem_limit = mem_usage.split("/")
+                    mem_current, mem_limit = mem_parts[0], mem_parts[1]
                     uptime = self._get_container_uptime(container)
 
                     stats.append(
