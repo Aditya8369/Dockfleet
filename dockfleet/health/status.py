@@ -120,11 +120,15 @@ def needs_restart(service: Service) -> bool:
     """
     Decide if a service should be auto-restarted.
     Rules:
+    - Do not restart if container is intentionally stopped (ContainerStatus.STOPPED).
     - At least 3 consecutive health check failures.
     - restart_policy must be "always" or "on-failure".
     - restart_policy == "never" is a hard block.
     - Only restart if currently unhealthy or crashed.
     """
+    if service.status in (ContainerStatus.STOPPED, ContainerStatus.STOPPED.value):
+        return False
+
     if service.consecutive_failures < 3:
         return False
 

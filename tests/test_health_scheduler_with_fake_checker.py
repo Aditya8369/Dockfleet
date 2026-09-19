@@ -1,3 +1,4 @@
+import time
 from sqlmodel import Session, select
 
 from dockfleet.cli.config import (
@@ -119,3 +120,50 @@ def test_scheduler_uses_injected_checker_and_db_updates(tmp_path):
     assert svc.status == ContainerStatus.RUNNING
     assert svc.health_status == HealthStatus.CRASHED
     assert svc.consecutive_failures == 3
+
+
+def test_scheduler_skips_stopped_service():
+    init_db()
+
+    config_path = "examples/dockfleet.yaml"
+    config: DockFleetConfig = load_config(config_path)
+
+    with Session(engine) as session:
+        seed_services(config, session)
+        for s in session.exec(select(Service)).all():
+            s.status = ContainerStatus.STOPPED
+            s.consecutive_failures = 0
+            session.add(s)
+        session.commit()
+
+    called = []
+
+    class TrackingChecker:
+        def check_process(self, name):
+            called.append(name)
+            return False
+
+        def check_http(self, *args, **kwargs):
+            called.append("http")
+            return False
+
+        def check_tcp(self, *args, **kwargs):
+            called.append("tcp")
+            return False
+
+    scheduler = HealthScheduler(
+        config=config,
+        interval_seconds=1,
+        checker=TrackingChecker(),
+    )
+    scheduler.start()
+    time.sleep(0.3)
+    scheduler.stop()
+
+    assert len(called) == 0
+
+    with Session(engine) as session:
+        for s in session.exec(select(Service)).all():
+            assert s.status == ContainerStatus.STOPPED
+            assert s.consecutive_failures == 0
+

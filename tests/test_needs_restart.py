@@ -125,3 +125,23 @@ def test_consecutive_failures_reset_after_successful_restart() -> None:
     assert svc_after.consecutive_failures == 0
     assert svc_after.status == ContainerStatus.RUNNING
     assert needs_restart(svc_after) is False
+
+
+def test_needs_restart_false_when_service_stopped() -> None:
+    svc = Service(
+        name="svc_stopped",
+        image="dummy-image",
+        restart_policy="always",
+        status=ContainerStatus.STOPPED,
+        health_status=HealthStatus.CRASHED,
+        consecutive_failures=5,
+    )
+    with Session(engine) as session:
+        session.add(svc)
+        session.commit()
+
+    loaded = _get_service("svc_stopped")
+    assert loaded.status == ContainerStatus.STOPPED
+    assert loaded.consecutive_failures == 5
+    assert needs_restart(loaded) is False
+
