@@ -12,6 +12,7 @@ from dockfleet.core.orchestrator import (
     get_service_stats,
     reset_orchestrator,
 )
+from dockfleet.health.models import ContainerStatus
 
 # ------------------------------------------------
 # Existing tests (cleaned up)
@@ -451,3 +452,86 @@ def test_concurrent_get_reset_no_stale_instance():
     finally:
         orch_mod.Orchestrator = original_cls
         reset_orchestrator()
+
+
+@patch("dockfleet.core.orchestrator.subprocess.run")
+def test_get_service_stats_unready_stats_handles_valueerror(mock_run):
+    """Test that get_service_stats handles unready stats ('--', '-- / --', '--') without raising ValueError."""
+    config = DockFleetConfig(
+        services={
+            "web": ServiceConfig(image="nginx", restart=RestartPolicy.always),
+            "db": ServiceConfig(image="postgres", restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+
+    # Simulate docker stats returning header + unready stats line for 'web'
+    stats_output = (
+        "CONTAINER\tCPU %\tMEM USAGE / LIMIT\tMEM %\tNET I/O\tBLOCK I/O\tPIDS\n"
+        "dockfleet_web\t--\t-- / --\t--\t0B / 0B\t0B / 0B\t0\n"
+    )
+
+    def side_effect(cmd, **kwargs):
+        if "stats" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = stats_output
+            return mock_res
+        if "inspect" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "2026-09-19T10:00:00.000Z"
+            return mock_res
+        return MagicMock(returncode=0, stdout="")
+
+    mock_run.side_effect = side_effect
+
+    stats = orch.get_service_stats()
+    assert len(stats) == 2
+
+    web_stat = next(s for s in stats if s.service_name == "web")
+    assert web_stat.status == ContainerStatus.RUNNING
+    assert web_stat.cpu_percent == 0.0
+    assert web_stat.mem_current == "--/--"
+    assert web_stat.mem_percent == "--"
+
+    db_stat = next(s for s in stats if s.service_name == "db")
+    assert db_stat.status == ContainerStatus.STOPPED
+
+
+@patch("dockfleet.core.orchestrator.subprocess.run")
+def test_get_service_stats_single_dash_memory(mock_run):
+    """Test that get_service_stats handles memory string without a slash (e.g. '--')."""
+    config = DockFleetConfig(
+        services={"app": ServiceConfig(image="node", restart=RestartPolicy.always)}
+    )
+    orch = Orchestrator(config)
+
+    stats_output = (
+        "CONTAINER\tCPU %\tMEM USAGE / LIMIT\tMEM %\tNET I/O\tBLOCK I/O\tPIDS\n"
+        "dockfleet_app\t--\t--\t--\t0B / 0B\t0B / 0B\t0\n"
+    )
+
+    def side_effect(cmd, **kwargs):
+        if "stats" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = stats_output
+            return mock_res
+        if "inspect" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "2026-09-19T10:00:00.000Z"
+            return mock_res
+        return MagicMock(returncode=0, stdout="")
+
+    mock_run.side_effect = side_effect
+
+    stats = orch.get_service_stats()
+    assert len(stats) == 1
+    app_stat = stats[0]
+    assert app_stat.service_name == "app"
+    assert app_stat.status == ContainerStatus.RUNNING
+    assert app_stat.cpu_percent == 0.0
+    assert app_stat.mem_current == "--/N/A"
+
