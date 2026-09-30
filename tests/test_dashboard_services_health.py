@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 from httpx import ASGITransport
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from dockfleet.dashboard.api import app
 from dockfleet.dashboard.routes import system_status
@@ -287,4 +287,64 @@ def test_system_status_counts_restarting_services(monkeypatch):
         assert data["running"] == 3
         assert data["unhealthy"] == 1
         assert data["stopped"] == 1
+
+
+def test_manual_restart_endpoint_increments_restart_count_by_one(monkeypatch, tmp_path):
+    """Ensure manual restart via /services/{name}/restart increases restart_count by exactly 1."""
+    from dockfleet.health.models import RestartEvent
+
+    db_path = tmp_path / "test.db"
+    test_engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc = DBService(
+            name="api",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.HEALTHY,
+            image="api:latest",
+            restart_policy="always",
+            restart_count=3,
+        )
+        session.add(svc)
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.health.status.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    mock_orch = MagicMock()
+
+    # Simulate orchestrator's restart_service: it stops/starts container and increments restart_count via _increment_restart_count
+    def fake_restart_service(name, *args, **kwargs):
+        with Session(test_engine) as s:
+            s_svc = s.exec(select(DBService).where(DBService.name == name)).first()
+            s_svc.restart_count = (s_svc.restart_count or 0) + 1
+            s.add(s_svc)
+            s.commit()
+        return True
+
+    mock_orch.restart_service.side_effect = fake_restart_service
+
+    monkeypatch.setattr("dockfleet.dashboard.routes.get_orchestrator", lambda: mock_orch)
+
+    async def _test_restart():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post("/services/api/restart")
+
+    response = asyncio.run(_test_restart())
+    assert response.status_code == 200
+    assert response.json() == {"message": "api restarted", "ok": True}
+
+    with Session(test_engine) as session:
+        updated = session.exec(select(DBService).where(DBService.name == "api")).first()
+        assert updated.restart_count == 4  # incremented by exactly 1 (from 3 to 4), not double-incremented
+
+        event = session.exec(select(RestartEvent).where(RestartEvent.service_name == "api")).first()
+        assert event is not None
+        assert event.reason == "manual_dashboard_restart"
+
 

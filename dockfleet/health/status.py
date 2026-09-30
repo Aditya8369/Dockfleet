@@ -197,7 +197,6 @@ def record_manual_restart_event(service_name: str) -> None:
     Called when a manual restart is triggered from the dashboard
     and the orchestrator has successfully restarted the container.
 
-    - Increments restart_count (restart attempts).
     - Marks status as ContainerStatus.RUNNING and health_status as HealthStatus.HEALTHY.
     - Inserts a RestartEvent with reason='manual_dashboard_restart'.
     """
@@ -213,7 +212,6 @@ def record_manual_restart_event(service_name: str) -> None:
         previous_status = (
             svc.status.value if isinstance(svc.status, ContainerStatus) else svc.status
         )
-        svc.restart_count = (svc.restart_count or 0) + 1
         svc.status = ContainerStatus.RUNNING
         svc.health_status = HealthStatus.HEALTHY
 
