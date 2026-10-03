@@ -182,6 +182,55 @@ def test_cli_logs_success_follow(mock_run):
 
 
 @patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_follow_keyboard_interrupt(mock_run):
+    """Test that dockfleet logs --follow exits cleanly with code 0 on KeyboardInterrupt."""
+    from unittest.mock import MagicMock
+
+    mock_run.side_effect = [MagicMock(returncode=0), KeyboardInterrupt()]
+    result = runner.invoke(app, ["logs", "web", "--follow"])
+    assert result.exit_code == 0
+    assert "Streaming logs for web" in result.stdout
+    assert "Service 'web' not found or container not running." not in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_follow_interrupt_returncode_130(mock_run):
+    """Test that dockfleet logs --follow exits cleanly with code 0 on SIGINT return code (130)."""
+    from unittest.mock import MagicMock
+
+    mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=130)]
+    result = runner.invoke(app, ["logs", "web", "--follow"])
+    assert result.exit_code == 0
+    assert "Streaming logs for web" in result.stdout
+    assert "Service 'web' not found or container not running." not in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_follow_interrupt_returncode_windows(mock_run):
+    """Test that dockfleet logs --follow exits cleanly with code 0 on Windows Ctrl+C (0xC000013A)."""
+    from unittest.mock import MagicMock
+
+    mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=3221225786)]
+    result = runner.invoke(app, ["logs", "web", "--follow"])
+    assert result.exit_code == 0
+    assert "Streaming logs for web" in result.stdout
+    assert "Service 'web' not found or container not running." not in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_follow_interrupt_returncode_signal(mock_run):
+    """Test that dockfleet logs --follow exits cleanly with code 0 on negative SIGINT return code."""
+    from unittest.mock import MagicMock
+
+    mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=-2)]
+    result = runner.invoke(app, ["logs", "web", "--follow"])
+    assert result.exit_code == 0
+    assert "Streaming logs for web" in result.stdout
+    assert "Service 'web' not found or container not running." not in result.stdout
+
+
+
+@patch("dockfleet.cli.main.subprocess.run")
 def test_cli_logs_success_no_follow(mock_run):
     """Test that dockfleet logs outputs logs when container exists."""
     from unittest.mock import MagicMock
@@ -238,5 +287,87 @@ def test_stop_background_scheduler_windows(mock_kill, mock_pid_running, tmp_path
 
     assert stop_background_scheduler(tmp_path) is True
     mock_kill.assert_called_once_with(1234, signal.SIGTERM)
+
+
+def test_cli_show_logs_displays_most_recent_ten_logs(tmp_path, monkeypatch):
+    """Test that dockfleet show-logs displays the 10 most recent logs in descending order."""
+    from datetime import datetime, timedelta, timezone
+    from sqlmodel import Session, SQLModel, create_engine
+    from dockfleet.health.models import LogEvent, Service, get_session
+
+    db_path = tmp_path / "test.db"
+    test_engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(test_engine)
+
+    base_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    with Session(test_engine) as session:
+        svc = Service(name="api", image="nginx", restart_policy="always", restart_count=0)
+        session.add(svc)
+        session.commit()
+
+        for i in range(20):
+            event = LogEvent(
+                service_id=svc.id,
+                service_name="api",
+                created_at=base_time + timedelta(minutes=i),
+                message=f"Log message {i}",
+            )
+            session.add(event)
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.cli.main.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    result = runner.invoke(app, ["show-logs"])
+    assert result.exit_code == 0
+
+    lines = [l for l in result.stdout.splitlines() if l.strip()]
+    assert len(lines) == 10
+
+    # Extract log message payload from lines: "[YYYY-MM-DD HH:MM:SS] [api] Log message X"
+    extracted_messages = [l.split("] ", 2)[-1] for l in lines]
+    expected_messages = [f"Log message {i}" for i in range(19, 9, -1)]
+    assert extracted_messages == expected_messages
+
+
+def test_cli_show_logs_service_filter_and_custom_limit(tmp_path, monkeypatch):
+    """Test that dockfleet show-logs supports --service filter and custom --limit."""
+    from datetime import datetime, timedelta, timezone
+    from sqlmodel import Session, SQLModel, create_engine
+    from dockfleet.health.models import LogEvent, Service, get_session
+
+    db_path = tmp_path / "test.db"
+    test_engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(test_engine)
+
+    base_time = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    with Session(test_engine) as session:
+        svc1 = Service(name="api", image="nginx", restart_policy="always", restart_count=0)
+        svc2 = Service(name="web", image="nginx", restart_policy="always", restart_count=0)
+        session.add_all([svc1, svc2])
+        session.commit()
+
+        for i in range(10):
+            session.add(LogEvent(service_id=svc1.id, service_name="api", created_at=base_time + timedelta(minutes=i), message=f"api log {i}"))
+            session.add(LogEvent(service_id=svc2.id, service_name="web", created_at=base_time + timedelta(minutes=i), message=f"web log {i}"))
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.cli.main.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    result = runner.invoke(app, ["show-logs", "--service", "web", "--limit", "3"])
+    assert result.exit_code == 0
+
+    lines = [l for l in result.stdout.splitlines() if l.strip()]
+    assert len(lines) == 3
+    assert "api log" not in result.stdout
+    assert "web log 9" in lines[0]
+    assert "web log 8" in lines[1]
+    assert "web log 7" in lines[2]
+
 
 

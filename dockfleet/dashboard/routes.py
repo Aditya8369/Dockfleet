@@ -199,7 +199,7 @@ class MetricsSummary(BaseModel):
         ..., description="Total services registered in DockFleet"
     )
     running_services: int = Field(
-        ..., description="Services currently in healthy state"
+        ..., description="Services currently in running state"
     )
     unhealthy_services: int = Field(
         ..., description="Services currently failing health checks"
@@ -457,7 +457,7 @@ def get_metrics():
 
     total = len(services)
     running = sum(
-        1 for s in services if s.get("health_status") == HealthStatus.HEALTHY.value
+        1 for s in services if s.get("status") == ContainerStatus.RUNNING.value
     )
     unhealthy = sum(
         1
@@ -466,15 +466,7 @@ def get_metrics():
         in (HealthStatus.UNHEALTHY.value, HealthStatus.CRASHED.value)
     )
     stopped = sum(
-        1
-        for s in services
-        if s.get("health_status")
-        not in (
-            HealthStatus.HEALTHY.value,
-            HealthStatus.RESTARTING.value,
-            HealthStatus.UNHEALTHY.value,
-            HealthStatus.CRASHED.value,
-        )
+        1 for s in services if s.get("status") == ContainerStatus.STOPPED.value
     )
     total_restarts = sum(s.get("restart_count", 0) for s in services)
 

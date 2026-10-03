@@ -96,6 +96,31 @@ def test_valid_environment_list():
     DockFleetConfig(**config)
 
 
+def test_valid_environment_dict_with_scalars():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "environment": {
+                    "PORT": 8080,
+                    "DEBUG": True,
+                    "RATE": 1.5,
+                    "NAME": "test",
+                },
+            }
+        }
+    }
+
+    parsed = DockFleetConfig(**config)
+    assert parsed.services["api"].environment == {
+        "PORT": "8080",
+        "DEBUG": "True",
+        "RATE": "1.5",
+        "NAME": "test",
+    }
+
+
 def test_invalid_environment():
     config = {
         "services": {
@@ -108,6 +133,21 @@ def test_invalid_environment():
     }
 
     with pytest.raises(ValueError):
+        DockFleetConfig(**config)
+
+
+def test_invalid_environment_dict_with_nested_structure():
+    config = {
+        "services": {
+            "api": {
+                "image": "nginx",
+                "restart": "always",
+                "environment": {"PORT": [8080]},
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="Invalid environment dict format"):
         DockFleetConfig(**config)
 
 

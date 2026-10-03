@@ -124,28 +124,32 @@ class ServiceConfig(BaseModel):
         return value
 
     # ENV VALIDATION
-    @field_validator("environment")
+    @field_validator("environment", mode="before")
     @classmethod
     def validate_environment(cls, value):
-        """Validate environment variables formatted as list or dict."""
+        """Validate environment variables formatted as list or dict, converting scalar values to strings."""
         if value is None:
             return value
 
         # list format → ["KEY=VALUE"]
         if isinstance(value, list):
             for item in value:
-                if "=" not in item:
+                if not isinstance(item, str) or "=" not in item:
                     raise ValueError(
                         f"Invalid environment entry '{item}', expected KEY=VALUE"
                     )
+            return value
 
         # dict format → {"KEY": "VALUE"}
         elif isinstance(value, dict):
+            converted = {}
             for k, v in value.items():
-                if not k or not isinstance(v, str):
+                if not k or not isinstance(v, (str, int, float, bool)):
                     raise ValueError("Invalid environment dict format")
+                converted[str(k)] = str(v)
+            return converted
 
-        return value
+        raise ValueError("Invalid environment format, expected list or dict")
 
     @field_validator("max_restarts")
     @classmethod

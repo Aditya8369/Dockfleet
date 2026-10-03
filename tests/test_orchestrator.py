@@ -651,5 +651,51 @@ def test_get_logs_stdout_close_exception_does_not_prevent_process_termination(mo
     mock_proc.terminate.assert_called_once()
 
 
+def test_down_stops_in_reverse_dependency_order():
+    """Verify that orchestrator down() stops services in reverse topological dependency order."""
+    config = DockFleetConfig(
+        services={
+            "db": ServiceConfig(image="postgres", restart=RestartPolicy.always),
+            "api": ServiceConfig(image="node", depends_on=["db"], restart=RestartPolicy.always),
+            "frontend": ServiceConfig(image="nginx", depends_on=["api"], restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+    stopped_order = []
+
+    def mock_stop_service(name):
+        stopped_order.append(name)
+        return True
+
+    orch.stop_service = mock_stop_service
+    orch.down()
+
+    # Dependencies: frontend -> api -> db
+    # Reverse topological order: frontend first, then api, then db
+    assert stopped_order == ["frontend", "api", "db"]
+
+
+def test_down_stops_api_before_db():
+    """Verify that api is stopped before db when api depends on db."""
+    config = DockFleetConfig(
+        services={
+            "db": ServiceConfig(image="postgres", restart=RestartPolicy.always),
+            "api": ServiceConfig(image="python:3.11", depends_on=["db"], restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+    stopped_order = []
+
+    def mock_stop_service(name):
+        stopped_order.append(name)
+        return True
+
+    orch.stop_service = mock_stop_service
+    orch.down()
+
+    assert stopped_order == ["api", "db"]
+
+
+
 
 

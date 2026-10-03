@@ -652,11 +652,12 @@ class Orchestrator:
         print("All services started.")
 
     def down(self):
-        """Stop and remove all services. Raises an exception if any service fails to stop."""
+        """Stop and remove all services in reverse dependency order. Raises an exception if any service fails to stop."""
         print("Stopping services...\n")
         failed = []
 
-        for name in self.config.services.keys():
+        order = list(reversed(self._resolve_service_order()))
+        for name in order:
             success = self.stop_service(name)
             if not success:
                 failed.append(name)
