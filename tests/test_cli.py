@@ -239,6 +239,44 @@ def test_cli_logs_success_no_follow(mock_run):
     result = runner.invoke(app, ["logs", "web"])
     assert result.exit_code == 0
     assert "Application started successfully" in result.stdout
+    # Verify subprocess.run was called with encoding="utf-8" and errors="replace"
+    calls = mock_run.call_args_list
+    assert len(calls) >= 2
+    for call in calls:
+        kwargs = call[1]
+        assert kwargs.get("encoding") == "utf-8"
+        assert kwargs.get("errors") == "replace"
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_unicode_characters(mock_run):
+    """Test that dockfleet logs handles UTF-8 characters such as emojis and symbols."""
+    from unittest.mock import MagicMock
+
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="🚀 Service started ✓ [日本語 logs: 起動完了]\n",
+    )
+    result = runner.invoke(app, ["logs", "web"])
+    assert result.exit_code == 0
+    assert "🚀 Service started ✓ [日本語 logs: 起動完了]" in result.stdout
+
+
+@patch("dockfleet.cli.main.subprocess.run")
+def test_cli_logs_bytes_with_non_utf8_fallback(mock_run):
+    """Test that dockfleet logs handles raw bytes with invalid sequences via errors='replace'."""
+    from unittest.mock import MagicMock
+
+    # Raw bytes with invalid UTF-8 byte 0xFF
+    mock_run.side_effect = [
+        MagicMock(returncode=0, stdout=""),
+        MagicMock(returncode=0, stdout=b"Corrupt byte \xff in stream\n", stderr=b""),
+    ]
+    result = runner.invoke(app, ["logs", "web"])
+    assert result.exit_code == 0
+    assert "Corrupt byte" in result.stdout
+    assert "\ufffd" in result.stdout or "?" in result.stdout
+
 
 
 def test_stop_background_scheduler_missing_pid_file(tmp_path):

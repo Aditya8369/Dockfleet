@@ -341,7 +341,8 @@ def logs(
         inspect_res = subprocess.run(
             ["docker", "inspect", container_name],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if inspect_res.returncode != 0:
             typer.echo(f"Service '{service}' not found or container not running.")
@@ -370,17 +371,28 @@ def logs(
             result = subprocess.run(
                 ["docker", "logs", "--tail", str(lines), container_name],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            stdout_str = (
+                result.stdout.decode("utf-8", errors="replace")
+                if isinstance(result.stdout, bytes)
+                else (result.stdout or "")
+            )
+            stderr_str = (
+                result.stderr.decode("utf-8", errors="replace")
+                if isinstance(result.stderr, bytes)
+                else (result.stderr or "")
             )
             if result.returncode != 0:
                 err_msg = (
-                    result.stderr.strip()
-                    if result.stderr and result.stderr.strip()
+                    stderr_str.strip()
+                    if stderr_str and stderr_str.strip()
                     else f"Service '{service}' not found or container not running."
                 )
                 typer.echo(err_msg)
                 raise typer.Exit(code=1)
-            typer.echo(result.stdout)
+            typer.echo(stdout_str)
     except KeyboardInterrupt:
         raise typer.Exit(code=0)
     except typer.Exit:
