@@ -1,8 +1,9 @@
 import logging
 import re
+import socket
 import subprocess
+import sys
 import threading
-
 import time
 
 from pydantic import BaseModel
@@ -244,6 +245,67 @@ def normalize_services(services):
     return services or {}
 
 
+def _extract_host_ports(service_config: dict) -> list[int]:
+    """Extract list of host port numbers configured for a service."""
+    ports = service_config.get("ports") or []
+    if isinstance(ports, dict):
+        raw_ports = [f"{k}:{v}" for k, v in ports.items()]
+    elif isinstance(ports, list):
+        raw_ports = ports
+    else:
+        raw_ports = [ports]
+
+    host_ports = []
+    for p in raw_ports:
+        p_str = str(p).strip()
+        if not p_str:
+            continue
+        if "/" in p_str:
+            p_str = p_str.split("/")[0]
+        parts = p_str.split(":")
+        try:
+            if len(parts) == 1:
+                host_ports.append(int(parts[0]))
+            elif len(parts) == 2:
+                host_ports.append(int(parts[0]))
+            elif len(parts) == 3:
+                host_ports.append(int(parts[1]))
+        except (ValueError, TypeError):
+            continue
+    return host_ports
+
+
+def is_port_released(port: int, host: str = "0.0.0.0") -> bool:
+    """Verify that a socket binding on the host port is released and available."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if sys.platform == "win32":
+                try:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                except (AttributeError, OSError):
+                    pass
+            s.bind((host, port))
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_ports_released(
+    ports: list[int],
+    timeout: float = 5.0,
+    poll_interval: float = 0.05,
+) -> bool:
+    """Poll until all specified host ports are released, or until timeout."""
+    if not ports:
+        return True
+    start = time.time()
+    while time.time() - start < timeout:
+        if all(is_port_released(p) for p in ports):
+            return True
+        time.sleep(poll_interval)
+    return all(is_port_released(p) for p in ports)
+
+
 class Orchestrator:
     """
     Main orchestration engine managing container lifecycle, deployments, and self-healing restarts.
@@ -304,6 +366,11 @@ class Orchestrator:
             resource_flags = build_resource_flags(service_config)
 
             docker_flags = port_flags + env_flags + resource_flags
+
+            # Verify that existing socket bindings are fully released before container spin-up
+            host_ports = _extract_host_ports(service_config)
+            if host_ports:
+                wait_for_ports_released(host_ports, timeout=5.0)
 
             # Always use service_config (not svc)
             self.docker.run_container(
@@ -452,6 +519,24 @@ class Orchestrator:
                 logger.warning(
                     "restart_service: error stopping %s: %s", container_name, exc
                 )
+
+            # Ensure container is removed and socket bindings are released
+            try:
+                self.docker.remove_container(container_name)
+            except Exception as exc:
+                logger.debug("restart_service: remove_container %s: %s", container_name, exc)
+
+            host_ports = _extract_host_ports(
+                svc
+                if isinstance(svc, dict)
+                else (
+                    svc.model_dump()
+                    if hasattr(svc, "model_dump")
+                    else vars(svc)
+                )
+            )
+            if host_ports:
+                wait_for_ports_released(host_ports, timeout=5.0)
 
             # Try to start a fresh container
             try:
@@ -721,13 +806,36 @@ class Orchestrator:
             print("Running containers:\n")
             self.docker.list_containers()
 
-    def restart(self):
+    def wait_for_release(self, timeout: float = 5.0) -> bool:
+        """
+        Verify that existing containers and socket bindings are fully released
+        before initiating container spin-up.
+        """
+        all_host_ports = []
+        for svc in self.config.services.values():
+            svc_dict = (
+                svc
+                if isinstance(svc, dict)
+                else (
+                    svc.model_dump()
+                    if hasattr(svc, "model_dump")
+                    else vars(svc)
+                )
+            )
+            all_host_ports.extend(_extract_host_ports(svc_dict))
+
+        if all_host_ports:
+            return wait_for_ports_released(list(set(all_host_ports)), timeout=timeout)
+        return True
+
+    def restart(self, timeout: float = 5.0):
         """
         Gracefully restart all services managed by DockFleet. This is a convenience wrapper around down() and up().
+        Verifies that existing containers and socket bindings are fully released before initiating container spin-up.
         """
         print("Restarting Services...\n")
         self.down()
-        time.sleep(2)
+        self.wait_for_release(timeout=timeout)
         self.up()
         print("\n All services restarted.")
 

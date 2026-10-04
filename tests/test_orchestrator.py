@@ -696,6 +696,76 @@ def test_down_stops_api_before_db():
     assert stopped_order == ["api", "db"]
 
 
+def test_extract_host_ports():
+    """Verify that _extract_host_ports extracts host ports correctly from various configs."""
+    from dockfleet.core.orchestrator import _extract_host_ports
+
+    # 1. Standard host:container string
+    assert _extract_host_ports({"ports": ["8080:80", "9000:9000"]}) == [8080, 9000]
+
+    # 2. Host with IP binding
+    assert _extract_host_ports({"ports": ["127.0.0.1:3000:3000"]}) == [3000]
+
+    # 3. Port with protocol suffix
+    assert _extract_host_ports({"ports": ["5432:5432/tcp"]}) == [5432]
+
+    # 4. Dictionary format
+    assert _extract_host_ports({"ports": {"8000": "80"}}) == [8000]
+
+    # 5. Empty or missing ports
+    assert _extract_host_ports({}) == []
+    assert _extract_host_ports({"ports": None}) == []
+
+
+def test_is_port_released_and_wait_for_ports_released():
+    """Verify is_port_released and wait_for_ports_released correctly detect socket availability."""
+    import socket
+    from dockfleet.core.orchestrator import is_port_released, wait_for_ports_released
+
+    # Bind a temporary socket to make a port busy
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("0.0.0.0", 0))
+        busy_port = s.getsockname()[1]
+        s.listen(1)
+
+        # While busy, is_port_released should report False
+        assert is_port_released(busy_port) is False
+
+    # Once closed, port should be released
+    assert is_port_released(busy_port) is True
+    assert wait_for_ports_released([busy_port], timeout=1.0) is True
+
+
+def test_orchestrator_restart_verifies_release_before_up():
+    """Verify that orchestrator restart() stops services, verifies release, and starts services."""
+    config = DockFleetConfig(
+        services={
+            "web": ServiceConfig(image="nginx", ports=["8080:80"], restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+    call_order = []
+
+    def mock_down():
+        call_order.append("down")
+
+    def mock_wait_for_release(timeout=5.0):
+        call_order.append("wait_for_release")
+        return True
+
+    def mock_up():
+        call_order.append("up")
+
+    orch.down = mock_down
+    orch.wait_for_release = mock_wait_for_release
+    orch.up = mock_up
+
+    orch.restart()
+
+    assert call_order == ["down", "wait_for_release", "up"]
+
+
+
 
 
 
