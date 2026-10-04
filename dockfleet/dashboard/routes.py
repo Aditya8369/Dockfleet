@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -412,13 +413,17 @@ def system_status():
 # Stream container logs (SSE)
 # ------------------------------------------------
 @router.get("/logs/stream/{service}")
-async def stream_logs(service: str):
+async def stream_logs(service: str, request: Request = None):
     """Server-Sent Events (SSE) endpoint to stream real-time container log lines."""
 
     async def event_stream():
         try:
             async for line in stream_container_logs(service):
+                if request is not None and await request.is_disconnected():
+                    break
                 yield line
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
         except Exception as exc:
             import traceback
 

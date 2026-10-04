@@ -436,3 +436,97 @@ async def test_popen_spawn_failure_loop_bound_safely(mock_popen):
     assert len(events) == 1
     assert "Docker is not installed or not in PATH" in events[0]
 
+
+@pytest.mark.asyncio
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
+async def test_stream_container_logs_client_disconnect_cleans_up(mock_popen, mock_store):
+    """When a client disconnects and closes the generator, subprocess and reader threads are cleaned up."""
+    import threading
+    import time
+
+    mock_proc = MagicMock()
+    mock_stdout = MagicMock()
+    mock_stderr = MagicMock()
+    mock_proc.stdout = mock_stdout
+    mock_proc.stderr = mock_stderr
+    mock_proc.poll = MagicMock(return_value=None)
+    mock_proc.terminate = MagicMock()
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = MagicMock(return_value=0)
+
+    # Simulate ongoing log stream
+    def infinite_stdout():
+        while not mock_stdout.closed:
+            return "log stream line\n"
+        return ""
+
+    mock_stdout.readline = MagicMock(side_effect=infinite_stdout)
+    mock_stdout.closed = False
+    mock_stderr.readline = MagicMock(return_value="")
+    mock_stderr.closed = False
+
+    def close_stdout():
+        mock_stdout.closed = True
+
+    mock_stdout.close = MagicMock(side_effect=close_stdout)
+    mock_popen.return_value = mock_proc
+
+    gen = stream_container_logs("api")
+    first_event = await gen.__anext__()
+    assert "log stream line" in first_event
+
+    # Simulate client disconnect (generator closed)
+    await gen.aclose()
+
+    # Verify stdout/stderr closed and process terminated
+    assert mock_stdout.close.called or mock_proc.terminate.called
+    assert mock_proc.terminate.called or mock_proc.kill.called
+
+
+@pytest.mark.asyncio
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
+async def test_stream_container_logs_cancellation_releases_resources(mock_popen, mock_store):
+    """When task streaming logs is cancelled, cleanup finishes and releases executor threads."""
+    import asyncio
+
+    mock_proc = MagicMock()
+    mock_stdout = MagicMock()
+    mock_stderr = MagicMock()
+    mock_proc.stdout = mock_stdout
+    mock_proc.stderr = mock_stderr
+    mock_proc.poll = MagicMock(return_value=None)
+    mock_proc.terminate = MagicMock()
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = MagicMock(return_value=0)
+
+    mock_stdout.readline = MagicMock(return_value="streaming line\n")
+    mock_stdout.closed = False
+    mock_stderr.readline = MagicMock(return_value="")
+    mock_stderr.closed = False
+    mock_popen.return_value = mock_proc
+
+    events_received = []
+
+    async def consumer():
+        gen = stream_container_logs("api")
+        try:
+            async for event in gen:
+                events_received.append(event)
+                await asyncio.sleep(0.01)
+        finally:
+            await gen.aclose()
+
+    task = asyncio.create_task(consumer())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert len(events_received) >= 1
+    assert mock_proc.terminate.called or mock_proc.kill.called or mock_stdout.close.called
+
+
