@@ -370,4 +370,50 @@ def test_cli_show_logs_service_filter_and_custom_limit(tmp_path, monkeypatch):
     assert "web log 7" in lines[2]
 
 
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.HealthScheduler")
+def test_cli_health_dev_once_healthy(mock_scheduler_cls, mock_bootstrap):
+    """Test that health-dev --once exits with code 0 when all services are healthy."""
+    mock_scheduler = mock_scheduler_cls.return_value
+    mock_scheduler.run_single_pass.return_value = {"db": True, "api": True, "crash_test": True}
+
+    result = runner.invoke(app, ["health-dev", "examples/dockfleet.yaml", "--once"])
+    assert result.exit_code == 0
+    assert "Running a single health pass" in result.stdout
+    assert "api: healthy" in result.stdout
+    assert "db: healthy" in result.stdout
+    assert "crash_test: healthy" in result.stdout
+    assert "Single health pass complete." in result.stdout
+    mock_scheduler.run_single_pass.assert_called_once()
+
+
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.HealthScheduler")
+def test_cli_health_dev_once_unhealthy(mock_scheduler_cls, mock_bootstrap):
+    """Test that health-dev --once exits with code 1 when any service is unhealthy."""
+    mock_scheduler = mock_scheduler_cls.return_value
+    mock_scheduler.run_single_pass.return_value = {"api": False}
+
+    result = runner.invoke(app, ["health-dev", "examples/dockfleet.yaml", "--once"])
+    assert result.exit_code == 1
+    assert "Running a single health pass" in result.stdout
+    assert "api: unhealthy" in result.stdout
+    assert "Single health pass complete." in result.stdout
+    mock_scheduler.run_single_pass.assert_called_once()
+
+
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.HealthScheduler")
+def test_cli_health_dev_once_missing_result(mock_scheduler_cls, mock_bootstrap):
+    """Test that health-dev --once exits with code 1 when a configured service check is missing."""
+    mock_scheduler = mock_scheduler_cls.return_value
+    mock_scheduler.run_single_pass.return_value = {}
+
+    result = runner.invoke(app, ["health-dev", "examples/dockfleet.yaml", "--once"])
+    assert result.exit_code == 1
+    assert "Single health pass complete." in result.stdout
+    mock_scheduler.run_single_pass.assert_called_once()
+
+
+
 
