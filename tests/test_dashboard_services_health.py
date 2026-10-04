@@ -380,3 +380,97 @@ def test_metrics_calculates_stopped_and_running_from_container_status(monkeypatc
         assert data["total_restarts"] == 3
 
 
+def test_get_services_preserves_unhealthy_status_for_stopped_containers(monkeypatch):
+    """Verify that get_services and /services preserve UNHEALTHY / CRASHED states for stopped containers."""
+    from sqlalchemy.pool import StaticPool
+
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc_unhealthy_stopped = DBService(
+            name="svc_unhealthy_stopped",
+            status=ContainerStatus.STOPPED,
+            health_status=HealthStatus.UNHEALTHY,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=3,
+        )
+        svc_crashed_stopped = DBService(
+            name="svc_crashed_stopped",
+            status=ContainerStatus.STOPPED,
+            health_status=HealthStatus.CRASHED,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=5,
+        )
+        svc_healthy_stopped = DBService(
+            name="svc_healthy_stopped",
+            status=ContainerStatus.STOPPED,
+            health_status=HealthStatus.HEALTHY,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=0,
+        )
+        session.add_all([svc_unhealthy_stopped, svc_crashed_stopped, svc_healthy_stopped])
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.dashboard.services.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+    monkeypatch.setattr(
+        "dockfleet.dashboard.routes.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    docker_ps_output = "\n".join(
+        [
+            json.dumps({"Names": "dockfleet_svc_unhealthy_stopped", "Status": "Exited (1) 2 minutes ago"}),
+            json.dumps({"Names": "dockfleet_svc_crashed_stopped", "Status": "Exited (137) 1 minute ago"}),
+            json.dumps({"Names": "dockfleet_svc_healthy_stopped", "Status": "Exited (0) 10 minutes ago"}),
+        ]
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        mock_res = MagicMock()
+        if "ps" in cmd:
+            mock_res.stdout = docker_ps_output
+        elif "stats" in cmd:
+            mock_res.stdout = ""
+        return mock_res
+
+    with patch("subprocess.run", side_effect=mock_subprocess_run):
+        services = get_services()
+
+        services_by_name = {s["name"]: s for s in services}
+        assert services_by_name["svc_unhealthy_stopped"]["status"] == ContainerStatus.STOPPED.value
+        assert services_by_name["svc_unhealthy_stopped"]["health_status"] == HealthStatus.UNHEALTHY.value
+
+        assert services_by_name["svc_crashed_stopped"]["status"] == ContainerStatus.STOPPED.value
+        assert services_by_name["svc_crashed_stopped"]["health_status"] == HealthStatus.CRASHED.value
+
+        assert services_by_name["svc_healthy_stopped"]["status"] == ContainerStatus.STOPPED.value
+        assert services_by_name["svc_healthy_stopped"]["health_status"] == ContainerStatus.STOPPED.value
+
+        # Test /services endpoint
+        async def _test_http():
+            async with httpx.AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://testserver"
+            ) as client:
+                return await client.get("/services")
+
+        response = asyncio.run(_test_http())
+        assert response.status_code == 200
+        data = {s["name"]: s for s in response.json()}
+        assert data["svc_unhealthy_stopped"]["status"] == "stopped"
+        assert data["svc_unhealthy_stopped"]["health_status"] == "unhealthy"
+        assert data["svc_crashed_stopped"]["status"] == "stopped"
+        assert data["svc_crashed_stopped"]["health_status"] == "crashed"
+
+
+
