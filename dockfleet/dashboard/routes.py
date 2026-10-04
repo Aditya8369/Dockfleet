@@ -224,8 +224,8 @@ class MetricsSummary(BaseModel):
 def dashboard_home(request: Request):
     """Render the dashboard HTML home page."""
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request},
+        request=request,
+        name="index.html",
     )
 
 
@@ -312,14 +312,15 @@ def list_logs(
 @router.get("/logs/explore/{service_name}")
 async def explore_logs(service_name: str, days: int = 1):
     """Retrieve time-windowed log records for a service."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_aware = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_naive = cutoff_aware.replace(tzinfo=None)
 
     with get_session() as session:
         statement = (
             select(LogEvent)
             .where(
                 LogEvent.service_name == service_name,
-                LogEvent.created_at > cutoff,
+                (LogEvent.created_at >= cutoff_aware) | (LogEvent.created_at >= cutoff_naive),
             )
             .order_by(LogEvent.created_at.desc())
             .limit(500)
