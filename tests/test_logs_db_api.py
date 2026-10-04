@@ -200,3 +200,56 @@ def test_ingest_docker_logs_nonzero_exit_discards_streamed_output():
         rows = session.exec(select(LogEvent)).all()
         assert rows == []
 
+
+def test_ingest_docker_logs_preserves_docker_timestamps_without_skew():
+    from datetime import datetime, timezone
+    from unittest.mock import MagicMock, patch
+
+    from sqlmodel import select
+
+    from dockfleet.health.log_ingestor import ingest_docker_logs_once
+
+    with get_session() as session:
+        session.exec(select(LogEvent)).all()
+        session.exec(select(Service)).all()
+        session.query(LogEvent).delete()
+        session.query(Service).delete()
+        svc = Service(
+            name="worker",
+            image="dummy-image",
+            restart_policy="always",
+        )
+        session.add(svc)
+        session.commit()
+
+    docker_timestamps = [
+        "2026-01-15T10:00:00.100000000Z",
+        "2026-01-15T10:00:00.200000000Z",
+        "2026-01-15T10:00:01.000000000Z",
+        "2026-01-15T10:00:05.500000000Z",
+    ]
+
+    mock_process = MagicMock()
+    mock_process.wait.return_value = 0
+    mock_process.stdout = MagicMock()
+    mock_process.stdout.__iter__.return_value = [
+        f"{ts} log entry {i}\n" for i, ts in enumerate(docker_timestamps)
+    ]
+
+    with patch("subprocess.Popen", return_value=mock_process):
+        ingest_docker_logs_once(tail=200)
+
+    with get_session() as session:
+        rows = session.exec(
+            select(LogEvent)
+            .where(LogEvent.service_name == "worker")
+            .order_by(LogEvent.id)
+        ).all()
+        assert len(rows) == 4
+        # Verify created_at accurately reflects the actual Docker log timestamps
+        assert rows[0].created_at == datetime(2026, 1, 15, 10, 0, 0, 100000, tzinfo=timezone.utc).replace(tzinfo=None) or rows[0].created_at == datetime(2026, 1, 15, 10, 0, 0, 100000, tzinfo=timezone.utc)
+        assert rows[1].created_at == datetime(2026, 1, 15, 10, 0, 0, 200000, tzinfo=timezone.utc).replace(tzinfo=None) or rows[1].created_at == datetime(2026, 1, 15, 10, 0, 0, 200000, tzinfo=timezone.utc)
+        assert rows[2].created_at == datetime(2026, 1, 15, 10, 0, 1, 0, tzinfo=timezone.utc).replace(tzinfo=None) or rows[2].created_at == datetime(2026, 1, 15, 10, 0, 1, 0, tzinfo=timezone.utc)
+        assert rows[3].created_at == datetime(2026, 1, 15, 10, 0, 5, 500000, tzinfo=timezone.utc).replace(tzinfo=None) or rows[3].created_at == datetime(2026, 1, 15, 10, 0, 5, 500000, tzinfo=timezone.utc)
+
+
