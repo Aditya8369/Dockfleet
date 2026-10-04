@@ -145,3 +145,30 @@ def test_needs_restart_false_when_service_stopped() -> None:
     assert loaded.consecutive_failures == 5
     assert needs_restart(loaded) is False
 
+
+def test_needs_restart_case_insensitive_policies() -> None:
+    # Test uppercase and mixed-case 'ALWAYS'
+    _create_service(name="svc_upper_always", restart_policy="ALWAYS")
+    update_service_health("svc_upper_always", is_healthy=False, reason="fail 1")
+    update_service_health("svc_upper_always", is_healthy=False, reason="fail 2")
+    update_service_health("svc_upper_always", is_healthy=False, reason="fail 3")
+    svc_always = _get_service("svc_upper_always")
+    assert needs_restart(svc_always) is True
+
+    # Test uppercase and mixed-case 'ON-FAILURE' and 'On_Failure'
+    _create_service(name="svc_upper_on_failure", restart_policy="ON-FAILURE")
+    update_service_health("svc_upper_on_failure", is_healthy=False, reason="fail 1")
+    update_service_health("svc_upper_on_failure", is_healthy=False, reason="fail 2")
+    update_service_health("svc_upper_on_failure", is_healthy=False, reason="fail 3")
+    svc_on_fail = _get_service("svc_upper_on_failure")
+    assert needs_restart(svc_on_fail) is True
+
+    # Test uppercase 'NEVER'
+    _create_service(name="svc_upper_never", restart_policy="NEVER")
+    update_service_health("svc_upper_never", is_healthy=False, reason="fail 1")
+    update_service_health("svc_upper_never", is_healthy=False, reason="fail 2")
+    update_service_health("svc_upper_never", is_healthy=False, reason="fail 3")
+    svc_never = _get_service("svc_upper_never")
+    assert needs_restart(svc_never) is False
+
+

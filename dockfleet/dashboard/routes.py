@@ -224,8 +224,8 @@ class MetricsSummary(BaseModel):
 def dashboard_home(request: Request):
     """Render the dashboard HTML home page."""
     return templates.TemplateResponse(
-        "index.html",
-        {"request": request},
+        request=request,
+        name="index.html",
     )
 
 

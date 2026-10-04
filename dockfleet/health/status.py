@@ -139,7 +139,15 @@ def needs_restart(service: Service) -> bool:
     if service.consecutive_failures < 3:
         return False
 
-    if service.restart_policy not in {"always", "on-failure"}:
+    policy = (
+        str(getattr(service.restart_policy, "value", service.restart_policy))
+        .strip()
+        .lower()
+        .replace("_", "-")
+        if service.restart_policy is not None
+        else ""
+    )
+    if policy not in {"always", "on-failure"}:
         return False
 
     if service.health_status not in {HealthStatus.UNHEALTHY, HealthStatus.CRASHED}:
