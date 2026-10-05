@@ -539,6 +539,114 @@ def test_get_service_stats_single_dash_memory(mock_run):
 
 
 @patch("dockfleet.core.orchestrator.subprocess.run")
+def test_get_service_stats_non_standard_memory_units(mock_run):
+    """Test get_service_stats handles various non-standard memory units properly."""
+    config = DockFleetConfig(
+        services={
+            "web": ServiceConfig(image="nginx", restart=RestartPolicy.always),
+            "worker": ServiceConfig(image="python", restart=RestartPolicy.always),
+            "cache": ServiceConfig(image="redis", restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+
+    stats_output = (
+        "CONTAINER\tCPU %\tMEM USAGE / LIMIT\tMEM %\tNET I/O\tBLOCK I/O\tPIDS\n"
+        "dockfleet_web\t12.5%\t512MB / 2GB\t25.0%\t1MB / 2MB\t0B / 0B\t10\n"
+        "dockfleet_worker\t0.0%\t1024kB / 10MB\t10.0%\t0B / 0B\t0B / 0B\t2\n"
+        "dockfleet_cache\t5.0%\t256MiB\t5.0%\t0B / 0B\t0B / 0B\t4\n"
+    )
+
+    def side_effect(cmd, **kwargs):
+        if "stats" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = stats_output
+            return mock_res
+        if "inspect" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "2026-09-19T10:00:00.000Z"
+            return mock_res
+        return MagicMock(returncode=0, stdout="")
+
+    mock_run.side_effect = side_effect
+
+    stats = orch.get_service_stats()
+    assert len(stats) == 3
+
+    web_stat = next(s for s in stats if s.service_name == "web")
+    assert web_stat.status == ContainerStatus.RUNNING
+    assert web_stat.cpu_percent == 12.5
+    assert web_stat.mem_current == "512MB/2GB"
+    assert web_stat.mem_percent == "25.0%"
+
+    worker_stat = next(s for s in stats if s.service_name == "worker")
+    assert worker_stat.status == ContainerStatus.RUNNING
+    assert worker_stat.cpu_percent == 0.0
+    assert worker_stat.mem_current == "1024kB/10MB"
+    assert worker_stat.mem_percent == "10.0%"
+
+    cache_stat = next(s for s in stats if s.service_name == "cache")
+    assert cache_stat.status == ContainerStatus.RUNNING
+    assert cache_stat.cpu_percent == 5.0
+    assert cache_stat.mem_current == "256MiB/N/A"
+    assert cache_stat.mem_percent == "5.0%"
+
+
+@patch("dockfleet.core.orchestrator.subprocess.run")
+def test_get_service_stats_unparseable_container_fallback(mock_run):
+    """Test that an unparseable container stats line falls back gracefully per-container while retaining valid stats."""
+    config = DockFleetConfig(
+        services={
+            "healthy": ServiceConfig(image="nginx", restart=RestartPolicy.always),
+            "corrupt": ServiceConfig(image="broken", restart=RestartPolicy.always),
+            "stopped": ServiceConfig(image="postgres", restart=RestartPolicy.always),
+        }
+    )
+    orch = Orchestrator(config)
+
+    # 'healthy' is valid, 'corrupt' has invalid CPU and malformed columns, 'stopped' is not running
+    stats_output = (
+        "CONTAINER\tCPU %\tMEM USAGE / LIMIT\tMEM %\tNET I/O\tBLOCK I/O\tPIDS\n"
+        "dockfleet_healthy\t1.5%\t50MiB / 200MiB\t25.0%\t10kB / 20kB\t0B / 0B\t5\n"
+        "dockfleet_corrupt\tinvalid.cpu.val%\t\n"
+    )
+
+    def side_effect(cmd, **kwargs):
+        if "stats" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = stats_output
+            return mock_res
+        if "inspect" in cmd:
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "2026-09-19T10:00:00.000Z"
+            return mock_res
+        return MagicMock(returncode=0, stdout="")
+
+    mock_run.side_effect = side_effect
+
+    stats = orch.get_service_stats()
+    assert len(stats) == 3
+
+    healthy_stat = next(s for s in stats if s.service_name == "healthy")
+    assert healthy_stat.status == ContainerStatus.RUNNING
+    assert healthy_stat.cpu_percent == 1.5
+    assert healthy_stat.mem_current == "50MiB/200MiB"
+    assert healthy_stat.mem_percent == "25.0%"
+
+    corrupt_stat = next(s for s in stats if s.service_name == "corrupt")
+    assert corrupt_stat.status == ContainerStatus.RUNNING
+    assert corrupt_stat.cpu_percent == 0.0
+    assert corrupt_stat.mem_current == "N/A/N/A"
+
+    stopped_stat = next(s for s in stats if s.service_name == "stopped")
+    assert stopped_stat.status == ContainerStatus.STOPPED
+
+
+@patch("dockfleet.core.orchestrator.subprocess.run")
 def test_monitor_services_empty_and_blank_lines(mock_run):
     """Test that monitor_services does not crash on empty, whitespace, or malformed docker ps output."""
     config = DockFleetConfig(

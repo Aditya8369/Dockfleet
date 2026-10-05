@@ -759,20 +759,43 @@ class Orchestrator:
             ]
 
             for line in lines:
-                parts = line.split("\t")
-                if len(parts) >= 4 and parts[0].startswith("dockfleet_"):
-                    container = parts[0].strip()
-                    service_name = container.replace("dockfleet_", "")
+                try:
+                    parts = line.split("\t")
+                    if not parts or not parts[0].strip().startswith("dockfleet_"):
+                        continue
 
-                    cpu_str, mem_usage, mem_perc = parts[1:4]
-                    cleaned_cpu = re.sub(r"[^\d.]", "", cpu_str)
-                    cpu = float(cleaned_cpu) if cleaned_cpu else 0.0
-                    mem_parts = (
-                        [p.strip() for p in mem_usage.split("/")]
-                        if "/" in mem_usage
-                        else [mem_usage.strip(), "N/A"]
-                    )
-                    mem_current, mem_limit = mem_parts[0], mem_parts[1]
+                    container = parts[0].strip()
+                    service_name = container.replace("dockfleet_", "", 1)
+
+                    cpu_str = parts[1] if len(parts) > 1 else ""
+                    mem_usage = parts[2] if len(parts) > 2 else ""
+                    mem_perc = parts[3] if len(parts) > 3 else ""
+
+                    try:
+                        cleaned_cpu = re.sub(r"[^\d.]", "", cpu_str)
+                        cpu = float(cleaned_cpu) if cleaned_cpu else 0.0
+                    except (ValueError, TypeError):
+                        cpu = 0.0
+
+                    try:
+                        if "/" in mem_usage:
+                            mem_parts = [p.strip() for p in mem_usage.split("/", 1)]
+                            mem_current = mem_parts[0] if mem_parts[0] else "N/A"
+                            mem_limit = (
+                                mem_parts[1]
+                                if len(mem_parts) > 1 and mem_parts[1]
+                                else "N/A"
+                            )
+                        else:
+                            mem_current = (
+                                mem_usage.strip() if mem_usage.strip() else "N/A"
+                            )
+                            mem_limit = "N/A"
+                        mem_formatted = f"{mem_current}/{mem_limit}"
+                    except Exception:
+                        mem_formatted = "N/A/N/A"
+
+                    mem_percent_val = mem_perc.strip() if mem_perc else "N/A"
                     uptime = self._get_container_uptime(container)
 
                     stats.append(
@@ -780,12 +803,36 @@ class Orchestrator:
                             service_name=service_name,
                             container_name=container,
                             cpu_percent=cpu,
-                            mem_current=f"{mem_current}/{mem_limit}",
-                            mem_percent=mem_perc.strip(),
+                            mem_current=mem_formatted,
+                            mem_percent=mem_percent_val,
                             uptime=uptime,
                             status=ContainerStatus.RUNNING,
                         )
                     )
+                except Exception as line_err:
+                    logger.warning(
+                        "Failed to parse container stats for line %r: %s",
+                        line,
+                        line_err,
+                    )
+                    try:
+                        parts = line.split("\t")
+                        if parts and parts[0].strip().startswith("dockfleet_"):
+                            c_name = parts[0].strip()
+                            s_name = c_name.replace("dockfleet_", "", 1)
+                            stats.append(
+                                ServiceStat(
+                                    service_name=s_name,
+                                    container_name=c_name,
+                                    cpu_percent=0.0,
+                                    mem_current="N/A/N/A",
+                                    mem_percent="N/A",
+                                    uptime=self._get_container_uptime(c_name),
+                                    status=ContainerStatus.RUNNING,
+                                )
+                            )
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.error("Stats collection failed: %s", e)
@@ -794,7 +841,7 @@ class Orchestrator:
         expected = [f"dockfleet_{name}" for name in self.config.services]
         for container in expected:
             if container not in {s.container_name for s in stats}:
-                service_name = container.replace("dockfleet_", "")
+                service_name = container.replace("dockfleet_", "", 1)
                 stats.append(
                     ServiceStat(
                         service_name=service_name,
@@ -822,7 +869,11 @@ class Orchestrator:
             )
             if result.returncode == 0:
                 started_at = result.stdout.strip()
-                return f"Up {started_at.split('T')[1].split('.')[0]}"
+                if "T" in started_at:
+                    time_part = started_at.split("T")[1].split(".")[0].rstrip("Z")
+                    return f"Up {time_part}"
+                elif started_at:
+                    return f"Up {started_at}"
         except Exception:
             pass
         return "Unknown"
