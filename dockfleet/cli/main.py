@@ -52,12 +52,17 @@ def spawn_background_scheduler(config_path: Path | str) -> subprocess.Popen:
     return subprocess.Popen(cmd, **kwargs)
 
 
-def stop_background_scheduler(project_dir: Path = PROJECT_ROOT) -> bool:
+def stop_background_scheduler(project_dir: Path | str = PROJECT_ROOT) -> bool:
     """
     Attempt to stop a running background scheduler process by reading .scheduler.pid.
     Handles process termination across both POSIX and Windows operating systems.
     """
-    pid_file = Path(project_dir) / SchedulerLock.PID_FILENAME
+    p = Path(project_dir).resolve()
+    if p.is_file() or p.suffix in (".db", ".yaml", ".yml", ".json"):
+        project_path = p.parent
+    else:
+        project_path = p
+    pid_file = project_path / SchedulerLock.PID_FILENAME
     if not pid_file.exists():
         return False
 

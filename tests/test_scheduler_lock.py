@@ -310,3 +310,32 @@ def test_pid_is_running():
     assert SchedulerLock._pid_is_running(0) is False
     assert SchedulerLock._pid_is_running(-1) is False
     assert SchedulerLock._pid_is_running(9999999) is False
+
+
+def test_relative_path_and_db_file_resolution(tmp_path, monkeypatch):
+    """Test that relative paths, subdirectories, and dockfleet.db paths resolve to the same project root lock."""
+    project = _make_project(tmp_path, "my_project")
+    sub_dir = project / "subdir"
+    sub_dir.mkdir()
+    db_file = project / "dockfleet.db"
+
+    # Lock created with absolute directory
+    lock_abs = SchedulerLock(project)
+
+    # Lock created with db file path
+    lock_db = SchedulerLock(db_file)
+    assert lock_db._project_dir == project.resolve()
+    assert lock_db._lock_path == lock_abs._lock_path
+    assert lock_db._pid_path == lock_abs._pid_path
+
+    # Lock created from another working directory using relative path
+    monkeypatch.chdir(sub_dir)
+    lock_rel = SchedulerLock("..")
+    assert lock_rel._project_dir == project.resolve()
+    assert lock_rel._lock_path == lock_abs._lock_path
+
+    # Lock created from project dir using "."
+    monkeypatch.chdir(project)
+    lock_dot = SchedulerLock(".")
+    assert lock_dot._project_dir == project.resolve()
+    assert lock_dot._lock_path == lock_abs._lock_path

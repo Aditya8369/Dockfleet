@@ -94,8 +94,12 @@ class SchedulerLock:
     LOCK_FILENAME = ".scheduler.lock"
     PID_FILENAME = ".scheduler.pid"
 
-    def __init__(self, project_dir: Path) -> None:
-        self._project_dir = Path(project_dir)
+    def __init__(self, project_dir: Path | str) -> None:
+        p = Path(project_dir).resolve()
+        if p.is_file() or p.suffix in (".db", ".yaml", ".yml", ".json"):
+            self._project_dir = p.parent
+        else:
+            self._project_dir = p
         self._lock_path = self._project_dir / self.LOCK_FILENAME
         self._pid_path = self._project_dir / self.PID_FILENAME
         self._fd: Optional[object] = None
