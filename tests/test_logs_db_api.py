@@ -253,3 +253,108 @@ def test_ingest_docker_logs_preserves_docker_timestamps_without_skew():
         assert rows[3].created_at == datetime(2026, 1, 15, 10, 0, 5, 500000, tzinfo=timezone.utc).replace(tzinfo=None) or rows[3].created_at == datetime(2026, 1, 15, 10, 0, 5, 500000, tzinfo=timezone.utc)
 
 
+def test_ingest_docker_logs_boundary_deduplication():
+    from unittest.mock import MagicMock, patch
+    from dockfleet.health.log_ingestor import ingest_docker_logs_once
+
+    with get_session() as session:
+        session.exec(select(LogEvent)).all()
+        session.exec(select(Service)).all()
+        session.query(LogEvent).delete()
+        session.query(Service).delete()
+        svc = Service(
+            name="api",
+            image="dummy-image",
+            restart_policy="always",
+        )
+        session.add(svc)
+        session.commit()
+
+    cycle = 1
+
+    def mock_subprocess_popen(cmd, *args, **kwargs):
+        mock_process = MagicMock()
+        mock_process.wait.return_value = 0
+        mock_stdout = MagicMock()
+
+        if cycle == 1:
+            mock_stdout.__iter__.return_value = [
+                "2026-10-02T22:21:32.100000000Z line 1\n",
+                "2026-10-02T22:21:33.200000000Z line 2\n",
+            ]
+        elif cycle == 2:
+            # Docker returns inclusive boundary record (line 2) + new record (line 3)
+            mock_stdout.__iter__.return_value = [
+                "2026-10-02T22:21:33.200000000Z line 2\n",
+                "2026-10-02T22:21:34.300000000Z line 3\n",
+            ]
+        elif cycle == 3:
+            # Docker returns only boundary record (line 3) when no new logs occurred
+            mock_stdout.__iter__.return_value = [
+                "2026-10-02T22:21:34.300000000Z line 3\n",
+            ]
+        else:
+            mock_stdout.__iter__.return_value = []
+
+        mock_process.stdout = mock_stdout
+        return mock_process
+
+    with patch("subprocess.Popen", side_effect=mock_subprocess_popen):
+        # Cycle 1: Initial ingest
+        ingest_docker_logs_once(tail=200)
+        with get_session() as session:
+            rows = session.exec(select(LogEvent).where(LogEvent.service_name == "api")).all()
+            assert len(rows) == 2
+            assert [r.message for r in rows] == ["line 1", "line 2"]
+
+        # Cycle 2: Incremental ingest with boundary record repetition
+        cycle = 2
+        ingest_docker_logs_once(tail=200)
+        with get_session() as session:
+            rows = session.exec(
+                select(LogEvent)
+                .where(LogEvent.service_name == "api")
+                .order_by(LogEvent.id)
+            ).all()
+            assert len(rows) == 3
+            assert [r.message for r in rows] == ["line 1", "line 2", "line 3"]
+
+        # Cycle 3: Incremental ingest with only boundary record (no new events)
+        cycle = 3
+        ingest_docker_logs_once(tail=200)
+        with get_session() as session:
+            rows = session.exec(
+                select(LogEvent)
+                .where(LogEvent.service_name == "api")
+                .order_by(LogEvent.id)
+            ).all()
+            assert len(rows) == 3
+            assert [r.message for r in rows] == ["line 1", "line 2", "line 3"]
+
+
+def test_parse_docker_timestamp_formats():
+    from datetime import datetime, timezone
+    from dockfleet.health.log_ingestor import _parse_docker_timestamp
+
+    # Nanosecond Z
+    dt = _parse_docker_timestamp("2026-10-02T22:21:32.123456789Z")
+    assert dt == datetime(2026, 10, 2, 22, 21, 32, 123456, tzinfo=timezone.utc)
+
+    # Microsecond Z
+    dt = _parse_docker_timestamp("2026-10-02T22:21:32.123456Z")
+    assert dt == datetime(2026, 10, 2, 22, 21, 32, 123456, tzinfo=timezone.utc)
+
+    # Second precision Z
+    dt = _parse_docker_timestamp("2026-10-02T22:21:32Z")
+    assert dt == datetime(2026, 10, 2, 22, 21, 32, 0, tzinfo=timezone.utc)
+
+    # Space separator
+    dt = _parse_docker_timestamp("2026-10-02 22:21:32.123456Z")
+    assert dt == datetime(2026, 10, 2, 22, 21, 32, 123456, tzinfo=timezone.utc)
+
+    # Offset timezone converted to UTC
+    dt = _parse_docker_timestamp("2026-10-02T22:21:32.000000+02:00")
+    assert dt == datetime(2026, 10, 2, 20, 21, 32, 0, tzinfo=timezone.utc)
+
+
+

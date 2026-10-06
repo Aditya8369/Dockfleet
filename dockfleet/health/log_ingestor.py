@@ -1,29 +1,51 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlmodel import select
 
 from .models import LogCursor, LogEvent, Service, get_session
 
+_DOCKER_TS_REGEX = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$"
+)
+
 
 def _parse_docker_timestamp(ts_str: str) -> datetime | None:
     """Parse RFC3339 / ISO 8601 Docker log timestamp into UTC datetime."""
+    if not ts_str:
+        return None
+    try:
+        match = _DOCKER_TS_REGEX.match(ts_str)
+        if match:
+            base, frac, tz = match.groups()
+            base = base.replace(" ", "T")
+            if frac:
+                frac = frac[:6].ljust(6, "0")
+                base = f"{base}.{frac}"
+            if tz:
+                if tz == "Z":
+                    tz = "+00:00"
+                elif len(tz) == 5 and (tz[0] in "+-") and ":" not in tz:
+                    tz = f"{tz[:3]}:{tz[3:]}"
+                base = f"{base}{tz}"
+            else:
+                base = f"{base}+00:00"
+            dt = datetime.fromisoformat(base)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+    except Exception:
+        pass
+
     try:
         dt = datetime.fromisoformat(ts_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except (ValueError, TypeError):
-        pass
-    try:
-        if ts_str.endswith("Z"):
-            dt = datetime.fromisoformat(ts_str[:-1] + "+00:00")
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
+        return dt.astimezone(timezone.utc)
     except Exception:
         pass
     return None
@@ -72,7 +94,7 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                     line = line.rstrip()
                     if line:
                         spool.write(line + "\n")
-                
+
                 process.stdout.close()
                 if process.wait() != 0:
                     session.rollback()
@@ -80,24 +102,63 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
 
                 spool.seek(0)
                 batch_count = 0
-                last_source_ts = None
-                
+                last_source_ts = cursor_ts_str
+
+                boundary_records: list[tuple[datetime, str]] = []
+                cursor_dt = (
+                    _parse_docker_timestamp(cursor_ts_str)
+                    if cursor_ts_str
+                    else None
+                )
+                if cursor_dt is not None:
+                    cursor_dt_cmp = cursor_dt.astimezone(timezone.utc).replace(
+                        tzinfo=None
+                    )
+                    existing_events = session.exec(
+                        select(LogEvent)
+                        .where(LogEvent.service_id == svc_id)
+                        .where(LogEvent.created_at >= cursor_dt_cmp)
+                        .order_by(LogEvent.id)
+                    ).all()
+                    for e in existing_events:
+                        e_dt = e.created_at
+                        if e_dt.tzinfo is None:
+                            e_dt = e_dt.replace(tzinfo=timezone.utc)
+                        else:
+                            e_dt = e_dt.astimezone(timezone.utc)
+                        boundary_records.append((e_dt, e.message or ""))
+
                 for line in spool:
                     line = line.rstrip()
                     if not line:
                         continue
-                        
+
                     message = line
                     log_created_at = None
+                    raw_ts = None
                     if " " in line:
-                        ts_str, msg = line.split(" ", 1)
-                        if ts_str.startswith("20") and ts_str.endswith("Z"):
-                            last_source_ts = ts_str
+                        potential_ts, msg = line.split(" ", 1)
+                        parsed_dt = _parse_docker_timestamp(potential_ts)
+                        if parsed_dt is not None:
+                            raw_ts = potential_ts
                             message = msg
-                            log_created_at = _parse_docker_timestamp(ts_str)
-                    
+                            log_created_at = parsed_dt
+
                     if log_created_at is None:
                         log_created_at = datetime.now(timezone.utc)
+
+                    # Boundary deduplication for incremental polling
+                    if cursor_dt is not None and raw_ts is not None:
+                        if log_created_at < cursor_dt:
+                            continue
+                        if log_created_at == cursor_dt:
+                            match_item = (log_created_at, message)
+                            if match_item in boundary_records:
+                                boundary_records.remove(match_item)
+                                continue
+
+                    if raw_ts:
+                        last_source_ts = raw_ts
 
                     event = LogEvent(
                         service_id=svc_id,
@@ -108,12 +169,15 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                         source="docker-logs-ingestor",
                     )
                     session.add(event)
-                    
+
                     batch_count += 1
                     if batch_count >= 1000:
                         if last_source_ts:
                             if not cursor_row:
-                                cursor_row = LogCursor(service_id=svc_id, last_timestamp=last_source_ts)
+                                cursor_row = LogCursor(
+                                    service_id=svc_id,
+                                    last_timestamp=last_source_ts,
+                                )
                                 session.add(cursor_row)
                             else:
                                 cursor_row.last_timestamp = last_source_ts
@@ -123,7 +187,9 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                 if batch_count > 0:
                     if last_source_ts:
                         if not cursor_row:
-                            cursor_row = LogCursor(service_id=svc_id, last_timestamp=last_source_ts)
+                            cursor_row = LogCursor(
+                                service_id=svc_id, last_timestamp=last_source_ts
+                            )
                             session.add(cursor_row)
                         else:
                             cursor_row.last_timestamp = last_source_ts
