@@ -288,9 +288,24 @@ def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
 
         typer.echo(f"Restarting services from {path}...\n")
 
+        # Stop background scheduler if running
+        stop_background_scheduler(PROJECT_ROOT)
+
+        # Ensure DB has Service rows for this config
+        typer.echo(f"Bootstrapping health DB from {path} ...")
+        bootstrap_from_path(str(path))
+
         orch = Orchestrator(config)
         orch.restart()
 
+        # Respawn background scheduler
+        spawn_background_scheduler(str(path))
+        typer.echo(
+            f"Health scheduler started in background; logs -> {HEALTH_LOG_PATH}\n"
+        )
+        typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
+    except typer.Exit:
+        raise
     except Exception as e:
         typer.echo(f"Error restarting services: {e}")
         raise typer.Exit(code=1)
