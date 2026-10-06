@@ -453,5 +453,58 @@ def test_cli_health_dev_once_missing_result(mock_scheduler_cls, mock_bootstrap):
     mock_scheduler.run_single_pass.assert_called_once()
 
 
+def test_cli_health_logs_missing_file(tmp_path, monkeypatch):
+    """Test that health-logs exits with code 1 when log file does not exist."""
+    non_existent = tmp_path / "dockfleet-health.log"
+    monkeypatch.setattr("dockfleet.cli.main.HEALTH_LOG_PATH", non_existent)
+    result = runner.invoke(app, ["health-logs", "--no-follow"])
+    assert result.exit_code == 1
+    assert "No health log file found yet." in result.stdout
+
+
+def test_cli_health_logs_no_follow(tmp_path, monkeypatch):
+    """Test that health-logs prints last N lines without follow."""
+    log_file = tmp_path / "dockfleet-health.log"
+    log_file.write_text("line 1\nline 2\nline 3\n", encoding="utf-8")
+    monkeypatch.setattr("dockfleet.cli.main.HEALTH_LOG_PATH", log_file)
+    result = runner.invoke(app, ["health-logs", "--no-follow", "--lines", "2"])
+    assert result.exit_code == 0
+    assert "line 1" not in result.stdout
+    assert "line 2" in result.stdout
+    assert "line 3" in result.stdout
+
+
+def test_cli_health_logs_follow_truncation_resets_offset(tmp_path, monkeypatch):
+    """Test that health-logs --follow detects file truncation (new_size < last_size) and resets offset."""
+    log_file = tmp_path / "dockfleet-health.log"
+    log_file.write_text("initial line 1\ninitial line 2\n", encoding="utf-8")
+    monkeypatch.setattr("dockfleet.cli.main.HEALTH_LOG_PATH", log_file)
+
+    call_count = 0
+
+    def mock_sleep(seconds):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Truncate and write shorter content (simulating rotation/truncation)
+            log_file.write_text("truncated new line\n", encoding="utf-8")
+        elif call_count == 2:
+            # Append another line
+            with log_file.open("a", encoding="utf-8") as f:
+                f.write("appended line\n")
+        else:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr("dockfleet.cli.main.time.sleep", mock_sleep)
+
+    result = runner.invoke(app, ["health-logs", "--follow"])
+    assert result.exit_code == 0
+    assert "initial line 1" in result.stdout
+    assert "truncated new line" in result.stdout
+    assert "appended line" in result.stdout
+    assert "Stopped following health logs." in result.stdout
+
+
+
 
 

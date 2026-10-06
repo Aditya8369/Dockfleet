@@ -615,7 +615,7 @@ def self_heal(
 
 @app.command("health-logs")
 def health_logs(
-    follow: bool = typer.Option(True, "--follow", "-f", help="Follow log output"),
+    follow: bool = typer.Option(True, "--follow/--no-follow", "-f", help="Follow log output"),
     lines: int = typer.Option(50, "--lines", "-n", help="Number of last lines to show"),
 ):
     """
@@ -636,11 +636,16 @@ def health_logs(
         return
 
     typer.echo("\n-- following dockfleet-health.log (Ctrl+C to stop) --")
-    last_size = log_path.stat().st_size
+    last_size = log_path.stat().st_size if log_path.exists() else 0
     try:
         while True:
             time.sleep(1)
+            if not log_path.exists():
+                last_size = 0
+                continue
             new_size = log_path.stat().st_size
+            if new_size < last_size:
+                last_size = 0
             if new_size > last_size:
                 with log_path.open("r", encoding="utf-8", errors="ignore") as f:
                     f.seek(last_size)
