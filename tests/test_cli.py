@@ -46,17 +46,27 @@ services:
 
 
 
+@patch("dockfleet.cli.main.spawn_background_scheduler")
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.stop_background_scheduler")
 @patch("dockfleet.cli.main.Orchestrator.restart")
-def test_cli_restart(mock_restart):
-    """Test that the restart command executes successfully without crashing."""
+def test_cli_restart(mock_restart, mock_stop_scheduler, mock_bootstrap, mock_spawn_scheduler):
+    """Test that the restart command stops scheduler, bootstraps DB, restarts orchestrator, and respawns scheduler."""
     result = runner.invoke(app, ["restart", "examples/dockfleet.yaml"])
     assert result.exit_code == 0
     assert "Restarting services from" in result.stdout
+    assert "Health scheduler started in background" in result.stdout
+    mock_stop_scheduler.assert_called_once()
+    mock_bootstrap.assert_called_once_with(str(Path("examples/dockfleet.yaml")))
     mock_restart.assert_called_once()
+    mock_spawn_scheduler.assert_called_once_with(str(Path("examples/dockfleet.yaml")))
 
 
+@patch("dockfleet.cli.main.spawn_background_scheduler")
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.stop_background_scheduler")
 @patch("dockfleet.cli.main.Orchestrator.restart")
-def test_cli_restart_failure(mock_restart):
+def test_cli_restart_failure(mock_restart, mock_stop_scheduler, mock_bootstrap, mock_spawn_scheduler):
     """Test that the restart command handles and exits with code 1."""
     mock_restart.side_effect = RuntimeError("Failed to stop services")
     result = runner.invoke(app, ["restart", "examples/dockfleet.yaml"])
@@ -64,11 +74,14 @@ def test_cli_restart_failure(mock_restart):
     assert "Error restarting services" in result.stdout
 
 
+@patch("dockfleet.cli.main.spawn_background_scheduler")
+@patch("dockfleet.cli.main.bootstrap_from_path")
+@patch("dockfleet.cli.main.stop_background_scheduler")
 @patch("dockfleet.core.orchestrator.mark_service_stopped")
 @patch("dockfleet.core.docker.DockerManager.remove_container")
 @patch("dockfleet.core.docker.DockerManager.stop_container")
 @patch("dockfleet.core.orchestrator.Orchestrator.up")
-def test_cli_restart_absent_container(mock_up, mock_stop, mock_remove, mock_mark):
+def test_cli_restart_absent_container(mock_up, mock_stop, mock_remove, mock_mark, mock_stop_scheduler, mock_bootstrap, mock_spawn_scheduler):
     """Regression test: restart proceeds when the configured container does not exist."""
     # Simulate Docker throwing a "No such container" error during down()
     mock_stop.side_effect = Exception("Error: No such container: dockfleet_api")
