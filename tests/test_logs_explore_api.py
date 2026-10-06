@@ -201,3 +201,38 @@ def test_explore_logs_filters_by_service():
     data = response.json()
     assert len(data) == 1
     assert data[0]["message"] == "message for svc-a"
+
+
+def test_explore_logs_timestamp_ist_format():
+    """Verify explore_logs formats timestamps in IST with +05:30 offset."""
+    utc_time = datetime(2026, 10, 6, 12, 0, 0, tzinfo=timezone.utc)
+
+    with get_session() as session:
+        svc = Service(name="api-ist", image="img:latest", restart_policy="always")
+        session.add(svc)
+        session.commit()
+        session.refresh(svc)
+
+        session.add(
+            LogEvent(
+                service_id=svc.id,
+                service_name="api-ist",
+                created_at=utc_time,
+                message="ist timezone test log",
+            )
+        )
+        session.commit()
+
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.get("/logs/explore/api-ist?days=100")
+
+    response = asyncio.run(_run())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    # UTC 12:00:00 -> IST 17:30:00+05:30
+    assert data[0]["timestamp"] == "2026-10-06T17:30:00+05:30"
+

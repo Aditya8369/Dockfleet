@@ -40,10 +40,15 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def to_ist_iso(dt: datetime | None) -> str | None:
-    """Convert UTC datetime to IST ISO string."""
+def to_ist_iso(dt: datetime | str | None) -> str | None:
+    """Convert UTC datetime or ISO string to IST ISO string."""
     if dt is None:
         return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except Exception:
+            return dt
     if dt.tzinfo is None:
         dt_utc = dt.replace(tzinfo=timezone.utc)
     else:
@@ -291,13 +296,18 @@ def list_logs(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    """Query persisted structured logs from SQLite database."""
-    events = query_logs(service_name=service_name, q=q, limit=limit, offset=offset)
+    actual_svc = service_name if isinstance(service_name, str) or service_name is None else None
+    actual_q = q if isinstance(q, str) or q is None else None
+    actual_limit = limit if isinstance(limit, int) else 50
+    actual_offset = offset if isinstance(offset, int) else 0
+    events = query_logs(
+        service_name=actual_svc, q=actual_q, limit=actual_limit, offset=actual_offset
+    )
     return [
         {
             "id": log.id,
             "service_name": log.service_name,
-            "timestamp": log.created_at,
+            "timestamp": to_ist_iso(log.created_at),
             "level": log.level,
             "message": log.message,
             "source": log.source,
@@ -326,7 +336,7 @@ async def explore_logs(service_name: str, days: int = 1):
             .limit(500)
         )
         logs = session.exec(statement).all()
-        return [{"timestamp": log.created_at, "message": log.message} for log in logs]
+        return [{"timestamp": to_ist_iso(log.created_at), "message": log.message} for log in logs]
 
 
 # ------------------------------------------------

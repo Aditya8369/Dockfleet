@@ -101,6 +101,35 @@ def test_logs_db_filter_by_service_and_query():
     assert "id" in log
     assert log["service_name"] == "api"
     assert "timestamp" in log
+    assert "+05:30" in str(log["timestamp"])
     assert log["level"] == "ERROR"
     assert "error" in (log["message"] or "").lower()
     assert log["source"] == "docker-logs"
+
+
+def test_logs_db_timestamp_ist_format():
+    """Verify /logs/db (list_logs) formats UTC timestamps to IST with +05:30."""
+    from datetime import datetime, timezone
+    utc_time = datetime(2026, 10, 6, 10, 0, 0, tzinfo=timezone.utc)
+
+    with get_session() as session:
+        svc = Service(name="db-ist-svc", image="img:latest", restart_policy="always")
+        session.add(svc)
+        session.commit()
+        session.refresh(svc)
+
+        session.add(
+            LogEvent(
+                service_id=svc.id,
+                service_name="db-ist-svc",
+                created_at=utc_time,
+                message="ist format db log",
+            )
+        )
+        session.commit()
+
+    data = list_logs(service_name="db-ist-svc")
+    assert len(data) == 1
+    # UTC 10:00:00 -> IST 15:30:00+05:30
+    assert data[0]["timestamp"] == "2026-10-06T15:30:00+05:30"
+

@@ -99,6 +99,12 @@ def query_logs(
     - limit/offset: standard pagination (O(N), less efficient)
     - cursor_ts/cursor_id: keyset pagination for fast sequential scanning (O(1))
     """
+    # Coerce parameters in case called directly as python function with FastAPI default objects
+    if not isinstance(limit, int):
+        limit = 50
+    if not isinstance(offset, int):
+        offset = 0
+
     # hard cap for safety
     limit = min(limit, 1000)
 
