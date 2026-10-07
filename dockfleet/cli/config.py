@@ -37,12 +37,12 @@ class ResourcesConfig(BaseModel):
     @field_validator("memory")
     @classmethod
     def validate_memory(cls, value):
-        """Validate memory string format, e.g. 512m or 1g."""
+        """Validate memory string format, e.g. 512m, 512mb, 1g, 1gb."""
         if value is None:
             return value
 
-        if not re.match(r"^\d+(m|g)$", value.lower()):
-            raise ValueError("invalid memory limit (expected like 512m or 1g)")
+        if not re.match(r"^\d+(b|k|m|g|t|kb|mb|gb|tb|kib|mib|gib|tib)$", value.lower()):
+            raise ValueError("invalid memory limit (expected like 512m, 512mb, 1g, 1gb)")
 
         return value
 

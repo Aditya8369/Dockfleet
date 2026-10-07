@@ -3,13 +3,14 @@ import pytest
 from dockfleet.cli.config import DockFleetConfig
 
 
-def test_valid_resources():
+@pytest.mark.parametrize("valid_mem", ["512m", "512mb", "1g", "1gb", "1024k", "1024kb", "1048576b", "512M", "1GB", "256MiB"])
+def test_valid_resources(valid_mem):
     config = {
         "services": {
             "api": {
                 "image": "nginx",
                 "restart": "always",
-                "resources": {"memory": "512m", "cpu": 0.5},
+                "resources": {"memory": valid_mem, "cpu": 0.5},
             }
         }
     }
@@ -17,13 +18,14 @@ def test_valid_resources():
     DockFleetConfig(**config)
 
 
-def test_invalid_memory():
+@pytest.mark.parametrize("invalid_mem", ["500xyz", "abc", "-512m", "512 megabytes", "mb"])
+def test_invalid_memory(invalid_mem):
     config = {
         "services": {
             "api": {
                 "image": "nginx",
                 "restart": "always",
-                "resources": {"memory": "500mb"},
+                "resources": {"memory": invalid_mem},
             }
         }
     }
