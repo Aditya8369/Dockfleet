@@ -52,3 +52,51 @@ def test_mark_service_running_and_stopped(tmp_path):
     with get_session() as session:
         svc = session.exec(select(Service).where(Service.name == service_name)).one()
         assert svc.status == ContainerStatus.STOPPED
+
+
+def test_record_restart_event_increments_restart_count(tmp_path):
+    """
+    Verify that record_restart_event increments service.restart_count in DB
+    and persists the RestartEvent record for crash analytics.
+    """
+    from dockfleet.health.models import RestartEvent
+    from dockfleet.health.status import record_restart_event
+
+    init_db()
+    with get_session() as session:
+        for s in session.exec(select(Service)).all():
+            session.delete(s)
+        for e in session.exec(select(RestartEvent)).all():
+            session.delete(e)
+        session.commit()
+
+        svc = Service(
+            name="test-self-heal",
+            image="nginx:alpine",
+            restart_policy="always",
+            status=ContainerStatus.RUNNING,
+            restart_count=0,
+        )
+        session.add(svc)
+        session.commit()
+        session.refresh(svc)
+
+    # Record first restart event
+    record_restart_event(svc, "3_failed_health_checks")
+
+    with get_session() as session:
+        updated = session.exec(select(Service).where(Service.name == "test-self-heal")).one()
+        assert updated.restart_count == 1
+        events = session.exec(select(RestartEvent).where(RestartEvent.service_name == "test-self-heal")).all()
+        assert len(events) == 1
+        assert events[0].reason == "3_failed_health_checks"
+
+    # Record second restart event
+    record_restart_event(updated, "unhealthy_restart")
+
+    with get_session() as session:
+        updated2 = session.exec(select(Service).where(Service.name == "test-self-heal")).one()
+        assert updated2.restart_count == 2
+        events = session.exec(select(RestartEvent).where(RestartEvent.service_name == "test-self-heal")).all()
+        assert len(events) == 2
+
