@@ -302,14 +302,43 @@ def test_different_projects_independent(tmp_path):
 def test_pid_is_running():
     """Test SchedulerLock._pid_is_running for active, dead, and invalid PIDs."""
     import os
+    import subprocess
+    import sys
 
     # Current process must be running
     assert SchedulerLock._pid_is_running(os.getpid()) is True
+
+    # Terminated child process must not be running (no false positives)
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    assert SchedulerLock._pid_is_running(proc.pid) is False
 
     # Invalid / non-existent PIDs
     assert SchedulerLock._pid_is_running(0) is False
     assert SchedulerLock._pid_is_running(-1) is False
     assert SchedulerLock._pid_is_running(9999999) is False
+
+
+def test_stale_lock_recovery_with_terminated_pid(tmp_path):
+    """Verify that when the PID file references a terminated PID, the stale lock is recovered automatically."""
+    import subprocess
+    import sys
+
+    project = _make_project(tmp_path, "stale_recovery_proj")
+    lock = SchedulerLock(project)
+
+    # Spawn and terminate a child process to get a real terminated PID
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    terminated_pid = proc.pid
+
+    # Write stale PID file referencing the terminated process
+    _write_stale_pid(lock, pid=terminated_pid)
+
+    # Acquire should detect PID is dead and recover the stale lock
+    lock.acquire()
+    assert lock.is_held
+    lock.release()
 
 
 def test_relative_path_and_db_file_resolution(tmp_path, monkeypatch):
