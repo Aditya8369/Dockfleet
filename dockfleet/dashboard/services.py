@@ -73,10 +73,9 @@ def get_services() -> list[dict]:
             # -------------------
             # Normalize status
             # -------------------
-            if "Up" in status_raw:
+            is_restarting = "Restarting" in status_raw
+            if "Up" in status_raw or is_restarting:
                 status = ContainerStatus.RUNNING.value
-            elif "Restarting" in status_raw:
-                status = HealthStatus.RESTARTING.value
             elif "Exited" in status_raw:
                 status = ContainerStatus.STOPPED.value
             else:
@@ -86,7 +85,9 @@ def get_services() -> list[dict]:
             services[service_name]["uptime"] = container.get("RunningFor")
 
             # sync health_status with real state, but preserve failing or restarting states
-            if status == ContainerStatus.RUNNING.value:
+            if is_restarting:
+                services[service_name]["health_status"] = HealthStatus.RESTARTING.value
+            elif status == ContainerStatus.RUNNING.value:
                 # Preserve failing or restarting states from health checks
                 if services[service_name]["health_status"] not in (
                     HealthStatus.UNHEALTHY.value,
@@ -94,8 +95,6 @@ def get_services() -> list[dict]:
                     HealthStatus.RESTARTING.value,
                 ):
                     services[service_name]["health_status"] = HealthStatus.HEALTHY.value
-            elif status == HealthStatus.RESTARTING.value:
-                services[service_name]["health_status"] = HealthStatus.RESTARTING.value
             elif status == ContainerStatus.STOPPED.value:
                 # Preserve failing states (unhealthy, crashed); for clean stops, ensure health_status is healthy
                 if services[service_name]["health_status"] not in (
