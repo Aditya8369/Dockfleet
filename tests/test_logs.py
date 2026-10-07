@@ -530,3 +530,31 @@ async def test_stream_container_logs_cancellation_releases_resources(mock_popen,
     assert mock_proc.terminate.called or mock_proc.kill.called or mock_stdout.close.called
 
 
+@pytest.mark.asyncio
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
+async def test_stream_container_logs_burst_load_does_not_drop_streaming(mock_popen, mock_store):
+    """Under burst loads (e.g. 2500 lines exceeding queue size 1000), stream stays alive and drops old buffer entries."""
+    mock_proc = MagicMock()
+    # Generate 2500 lines followed by EOF
+    burst_lines = [f"burst line {i}\n" for i in range(2500)] + [""]
+    mock_proc.stdout.readline = MagicMock(side_effect=burst_lines)
+    mock_proc.stderr.readline = MagicMock(return_value="")
+    mock_proc.wait = MagicMock(return_value=0)
+    mock_proc.returncode = 0
+    mock_proc.terminate = MagicMock()
+    mock_proc.poll = MagicMock(return_value=0)
+    mock_popen.return_value = mock_proc
+
+    events = []
+    async for event in stream_container_logs("api"):
+        events.append(event)
+
+    # Stream stayed alive through all burst lines and reached normal completion
+    assert len(events) >= 1000
+    # Latest burst lines should be present
+    assert any("burst line 2499" in e for e in events)
+    assert not any("error reading logs" in e.lower() for e in events)
+
+
+
