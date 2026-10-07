@@ -56,6 +56,7 @@ def stop_background_scheduler(project_dir: Path | str = PROJECT_ROOT) -> bool:
     """
     Attempt to stop a running background scheduler process by reading .scheduler.pid.
     Handles process termination across both POSIX and Windows operating systems.
+    Deletes all temporary lock and PID tracking files (.scheduler.lock, .scheduler.pid).
     """
     p = Path(project_dir).resolve()
     if p.is_file() or p.suffix in (".db", ".yaml", ".yml", ".json"):
@@ -63,39 +64,47 @@ def stop_background_scheduler(project_dir: Path | str = PROJECT_ROOT) -> bool:
     else:
         project_path = p
     pid_file = project_path / SchedulerLock.PID_FILENAME
-    if not pid_file.exists():
-        return False
+    lock_file = project_path / SchedulerLock.LOCK_FILENAME
+    stopped = False
 
-    try:
-        info = json.loads(pid_file.read_text(encoding="utf-8"))
-        pid = info.get("pid")
-        if pid and SchedulerLock._pid_is_running(pid):
-            if sys.platform == "win32":
-                try:
+    if pid_file.exists():
+        try:
+            info = json.loads(pid_file.read_text(encoding="utf-8"))
+            pid = info.get("pid")
+            if pid and SchedulerLock._pid_is_running(pid):
+                if sys.platform == "win32":
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except (OSError, PermissionError):
+                        import ctypes
+
+                        PROCESS_TERMINATE = 0x0001
+                        kernel32 = ctypes.windll.kernel32
+                        h_proc = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                        if h_proc:
+                            try:
+                                kernel32.TerminateProcess(h_proc, 1)
+                            finally:
+                                kernel32.CloseHandle(h_proc)
+                        else:
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
+                else:
                     os.kill(pid, signal.SIGTERM)
-                except (OSError, PermissionError):
-                    import ctypes
+                stopped = True
+        except Exception:
+            pass
 
-                    PROCESS_TERMINATE = 0x0001
-                    kernel32 = ctypes.windll.kernel32
-                    h_proc = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
-                    if h_proc:
-                        try:
-                            kernel32.TerminateProcess(h_proc, 1)
-                        finally:
-                            kernel32.CloseHandle(h_proc)
-                    else:
-                        subprocess.run(
-                            ["taskkill", "/F", "/T", "/PID", str(pid)],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-            else:
-                os.kill(pid, signal.SIGTERM)
-            return True
-    except Exception:
-        pass
-    return False
+    for path in (pid_file, lock_file):
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return stopped
 
 
 def version_callback(value: bool):
@@ -266,8 +275,8 @@ def down(path: Path = typer.Argument("examples/dockfleet.yaml")):
         orch = Orchestrator(config)
         orch.down()
 
-        # Stop background scheduler if running
-        stop_background_scheduler(PROJECT_ROOT)
+        # Stop background scheduler if running and delete temporary lock/pid files
+        stop_background_scheduler(path)
 
         typer.echo("\n✓ Services stopped")
     except typer.Exit:
