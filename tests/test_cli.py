@@ -304,8 +304,12 @@ def test_stop_background_scheduler_dead_pid(tmp_path):
     from dockfleet.health.scheduler_lock import SchedulerLock
 
     pid_file = tmp_path / SchedulerLock.PID_FILENAME
+    lock_file = tmp_path / SchedulerLock.LOCK_FILENAME
     pid_file.write_text(json.dumps({"pid": 9999999}))
+    lock_file.write_text("lock")
     assert stop_background_scheduler(tmp_path) is False
+    assert not pid_file.exists()
+    assert not lock_file.exists()
 
 
 @patch("dockfleet.cli.main.SchedulerLock._pid_is_running", return_value=True)
@@ -318,10 +322,14 @@ def test_stop_background_scheduler_posix(mock_kill, mock_pid_running, tmp_path, 
 
     monkeypatch.setattr("sys.platform", "linux")
     pid_file = tmp_path / SchedulerLock.PID_FILENAME
+    lock_file = tmp_path / SchedulerLock.LOCK_FILENAME
     pid_file.write_text(json.dumps({"pid": 1234}))
+    lock_file.write_text("lock")
 
     assert stop_background_scheduler(tmp_path) is True
     mock_kill.assert_called_once_with(1234, signal.SIGTERM)
+    assert not pid_file.exists()
+    assert not lock_file.exists()
 
 
 @patch("dockfleet.cli.main.SchedulerLock._pid_is_running", return_value=True)
@@ -334,10 +342,39 @@ def test_stop_background_scheduler_windows(mock_kill, mock_pid_running, tmp_path
 
     monkeypatch.setattr("sys.platform", "win32")
     pid_file = tmp_path / SchedulerLock.PID_FILENAME
+    lock_file = tmp_path / SchedulerLock.LOCK_FILENAME
     pid_file.write_text(json.dumps({"pid": 1234}))
+    lock_file.write_text("lock")
 
     assert stop_background_scheduler(tmp_path) is True
     mock_kill.assert_called_once_with(1234, signal.SIGTERM)
+    assert not pid_file.exists()
+    assert not lock_file.exists()
+
+
+@patch("dockfleet.core.orchestrator.Orchestrator.down")
+def test_cli_down_deletes_orphaned_lock_and_pid_files(mock_down, tmp_path):
+    """Test that dockfleet down deletes .scheduler.lock and .scheduler.pid files in project directory."""
+    import json
+    from dockfleet.health.scheduler_lock import SchedulerLock
+
+    config_file = tmp_path / "dockfleet.yaml"
+    config_file.write_text("""
+services:
+  api:
+    image: nginx
+    restart: always
+""")
+
+    pid_file = tmp_path / SchedulerLock.PID_FILENAME
+    lock_file = tmp_path / SchedulerLock.LOCK_FILENAME
+    pid_file.write_text(json.dumps({"pid": 9999999}))
+    lock_file.write_text("lock")
+
+    result = runner.invoke(app, ["down", str(config_file)])
+    assert result.exit_code == 0
+    assert not pid_file.exists()
+    assert not lock_file.exists()
 
 
 def test_cli_show_logs_displays_most_recent_ten_logs(tmp_path, monkeypatch):
