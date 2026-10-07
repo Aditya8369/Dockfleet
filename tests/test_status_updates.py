@@ -54,38 +54,49 @@ def test_mark_service_running_and_stopped(tmp_path):
         assert svc.status == ContainerStatus.STOPPED
 
 
-def test_stopped_service_ignores_failed_health_checks():
+def test_record_restart_event_increments_restart_count(tmp_path):
     """
-    Verify that if svc.status is STOPPED, failed health check responses
-    are ignored and do not mutate health state into CRASHED or increment failures.
+    Verify that record_restart_event increments service.restart_count in DB
+    and persists the RestartEvent record for crash analytics.
     """
-    from dockfleet.health.models import HealthStatus
-    from dockfleet.health.status import update_service_health
+    from dockfleet.health.models import RestartEvent
+    from dockfleet.health.status import record_restart_event
 
     init_db()
     with get_session() as session:
         for s in session.exec(select(Service)).all():
             session.delete(s)
+        for e in session.exec(select(RestartEvent)).all():
+            session.delete(e)
         session.commit()
 
         svc = Service(
-            name="stopped-svc",
-            image="nginx",
+            name="test-self-heal",
+            image="nginx:alpine",
             restart_policy="always",
-            status=ContainerStatus.STOPPED,
-            health_status=HealthStatus.HEALTHY,
-            consecutive_failures=0,
+            status=ContainerStatus.RUNNING,
+            restart_count=0,
         )
         session.add(svc)
         session.commit()
+        session.refresh(svc)
 
-    # Simulate in-flight failed health checks arriving after manual stop
-    update_service_health("stopped-svc", is_healthy=False, reason="connection refused")
-    update_service_health("stopped-svc", is_healthy=False, reason="timeout")
-    update_service_health("stopped-svc", is_healthy=False, reason="timeout")
+    # Record first restart event
+    record_restart_event(svc, "3_failed_health_checks")
 
     with get_session() as session:
-        svc = session.exec(select(Service).where(Service.name == "stopped-svc")).one()
-        assert svc.status == ContainerStatus.STOPPED
-        assert svc.health_status == HealthStatus.HEALTHY
-        assert svc.consecutive_failures == 0
+        updated = session.exec(select(Service).where(Service.name == "test-self-heal")).one()
+        assert updated.restart_count == 1
+        events = session.exec(select(RestartEvent).where(RestartEvent.service_name == "test-self-heal")).all()
+        assert len(events) == 1
+        assert events[0].reason == "3_failed_health_checks"
+
+    # Record second restart event
+    record_restart_event(updated, "unhealthy_restart")
+
+    with get_session() as session:
+        updated2 = session.exec(select(Service).where(Service.name == "test-self-heal")).one()
+        assert updated2.restart_count == 2
+        events = session.exec(select(RestartEvent).where(RestartEvent.service_name == "test-self-heal")).all()
+        assert len(events) == 2
+

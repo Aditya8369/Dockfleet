@@ -170,23 +170,49 @@ def needs_restart(service: Service) -> bool:
 
 def record_restart_event(service: Service, reason: str) -> None:
     """
-    Store a simple restart event for later crash analytics.
+    Store a simple restart event for later crash analytics and increment restart_count in DB.
     Example reason: "3_failed_health_checks".
     """
-    event = RestartEvent(
-        service_id=service.id,
-        service_name=service.name,
-        restarted_at=datetime.now(timezone.utc),
-        reason=reason,
-        previous_status=(
-            service.status.value
-            if isinstance(service.status, ContainerStatus)
-            else service.status
-        ),
-        new_status=ContainerStatus.RUNNING.value,  # intended post-restart status
-    )
-
     with get_session() as session:
+        svc = None
+        if getattr(service, "id", None) is not None:
+            svc = session.exec(
+                select(Service).where(Service.id == service.id)
+            ).one_or_none()
+        if svc is None and getattr(service, "name", None):
+            svc = session.exec(
+                select(Service).where(Service.name == service.name)
+            ).one_or_none()
+
+        if svc is not None:
+            svc.restart_count = (svc.restart_count or 0) + 1
+            session.add(svc)
+            service.restart_count = svc.restart_count
+            service_id = svc.id
+            service_name = svc.name
+            previous_status = (
+                svc.status.value
+                if isinstance(svc.status, ContainerStatus)
+                else svc.status
+            )
+        else:
+            service_id = getattr(service, "id", None)
+            service_name = getattr(service, "name", "")
+            previous_status = (
+                service.status.value
+                if isinstance(service.status, ContainerStatus)
+                else getattr(service, "status", None)
+            )
+
+        event = RestartEvent(
+            service_id=service_id,
+            service_name=service_name,
+            restarted_at=datetime.now(timezone.utc),
+            reason=reason,
+            previous_status=previous_status,
+            new_status=ContainerStatus.RUNNING.value,  # intended post-restart status
+        )
+
         session.add(event)
         session.commit()
 

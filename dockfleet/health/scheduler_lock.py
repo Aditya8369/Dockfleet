@@ -216,13 +216,32 @@ class SchedulerLock:
 
             kernel32 = ctypes.windll.kernel32
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            SYNCHRONIZE = 0x00100000
+            WAIT_TIMEOUT = 0x00000102
+            STILL_ACTIVE = 259
+            ERROR_ACCESS_DENIED = 5
+
             h_process = kernel32.OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+                PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
             )
-            if h_process:
+            if not h_process:
+                # If access is denied, assume alive to avoid stealing lock
+                if kernel32.GetLastError() == ERROR_ACCESS_DENIED:
+                    return True
+                return False
+
+            try:
+                wait_result = kernel32.WaitForSingleObject(h_process, 0)
+                if wait_result == WAIT_TIMEOUT:
+                    return True
+
+                exit_code = ctypes.c_ulong()
+                if kernel32.GetExitCodeProcess(h_process, ctypes.byref(exit_code)):
+                    return exit_code.value == STILL_ACTIVE
+
+                return False
+            finally:
                 kernel32.CloseHandle(h_process)
-                return True
-            return False
         else:
             try:
                 os.kill(pid, 0)

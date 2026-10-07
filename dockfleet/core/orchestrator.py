@@ -245,8 +245,8 @@ def normalize_services(services):
     return services or {}
 
 
-def _extract_host_ports(service_config: dict) -> list[int]:
-    """Extract list of host port numbers configured for a service."""
+def _extract_host_ports(service_config: dict) -> list[tuple[str, int]]:
+    """Extract list of (host, port) tuples configured for a service."""
     ports = service_config.get("ports") or []
     if isinstance(ports, dict):
         raw_ports = [f"{k}:{v}" for k, v in ports.items()]
@@ -255,7 +255,7 @@ def _extract_host_ports(service_config: dict) -> list[int]:
     else:
         raw_ports = [ports]
 
-    host_ports = []
+    host_ports: list[tuple[str, int]] = []
     for p in raw_ports:
         p_str = str(p).strip()
         if not p_str:
@@ -265,11 +265,18 @@ def _extract_host_ports(service_config: dict) -> list[int]:
         parts = p_str.split(":")
         try:
             if len(parts) == 1:
-                host_ports.append(int(parts[0]))
+                host_ports.append(("0.0.0.0", int(parts[0])))
             elif len(parts) == 2:
-                host_ports.append(int(parts[0]))
+                if parts[0].replace(".", "").isdigit():
+                    if "." in parts[0]:
+                        host_ports.append((parts[0], int(parts[1])))
+                    else:
+                        host_ports.append(("0.0.0.0", int(parts[0])))
+                else:
+                    host_ports.append((parts[0], int(parts[1])))
             elif len(parts) == 3:
-                host_ports.append(int(parts[1]))
+                host_ip = parts[0] if parts[0] else "0.0.0.0"
+                host_ports.append((host_ip, int(parts[1])))
         except (ValueError, TypeError):
             continue
     return host_ports
@@ -291,19 +298,26 @@ def is_port_released(port: int, host: str = "0.0.0.0") -> bool:
 
 
 def wait_for_ports_released(
-    ports: list[int],
+    ports: list[tuple[str, int] | int],
     timeout: float = 5.0,
     poll_interval: float = 0.05,
 ) -> bool:
     """Poll until all specified host ports are released, or until timeout."""
     if not ports:
         return True
+
+    def _check_binding(p: tuple[str, int] | int) -> bool:
+        if isinstance(p, tuple):
+            host, port = p
+            return is_port_released(port, host=host)
+        return is_port_released(p)
+
     start = time.time()
     while time.time() - start < timeout:
-        if all(is_port_released(p) for p in ports):
+        if all(_check_binding(p) for p in ports):
             return True
         time.sleep(poll_interval)
-    return all(is_port_released(p) for p in ports)
+    return all(_check_binding(p) for p in ports)
 
 
 class Orchestrator:

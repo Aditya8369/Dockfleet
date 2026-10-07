@@ -475,4 +475,72 @@ def test_get_services_preserves_unhealthy_status_for_stopped_containers(monkeypa
         assert data["svc_healthy_stopped"]["health_status"] == "healthy"
 
 
+def test_get_services_docker_ps_restarting_status(monkeypatch):
+    """
+    Verify that when docker ps reports container status as 'Restarting (...)',
+    container lifecycle status is ContainerStatus.RUNNING ('running') and
+    health_status is HealthStatus.RESTARTING ('restarting').
+    """
+    from sqlalchemy.pool import StaticPool
+
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc = DBService(
+            name="web_restart_loop",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.HEALTHY,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=3,
+        )
+        session.add(svc)
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.dashboard.services.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+    monkeypatch.setattr(
+        "dockfleet.dashboard.routes.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    docker_ps_output = json.dumps(
+        {
+            "Names": "dockfleet_web_restart_loop",
+            "Status": "Restarting (1) 5 seconds ago",
+            "RunningFor": "5 minutes",
+        }
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        mock_res = MagicMock()
+        if "ps" in cmd:
+            mock_res.stdout = docker_ps_output
+        elif "stats" in cmd:
+            mock_res.stdout = ""
+        return mock_res
+
+    with patch("subprocess.run", side_effect=mock_subprocess_run):
+        services = get_services()
+        assert len(services) == 1
+        assert services[0]["name"] == "web_restart_loop"
+        assert services[0]["status"] == ContainerStatus.RUNNING.value
+        assert services[0]["health_status"] == HealthStatus.RESTARTING.value
+
+        # Test /status route
+        status = system_status()
+        assert status["total_services"] == 1
+        assert status["running"] == 1
+        assert status["restarting"] == 1
+        assert status["stopped"] == 0
+
+
+
 
