@@ -236,3 +236,51 @@ def test_explore_logs_timestamp_ist_format():
     # UTC 12:00:00 -> IST 17:30:00+05:30
     assert data[0]["timestamp"] == "2026-10-06T17:30:00+05:30"
 
+
+def test_explore_logs_string_lexicographical_same_day_comparison():
+    """
+    Verify that logs with string/datetime representations created within the last 24h
+    are not dropped due to ASCII space vs 'T' lexicographical comparison in SQLite.
+    """
+    from sqlalchemy import text
+
+    now_utc = datetime.now(timezone.utc)
+    # 3 hours ago (within 24h)
+    log_time_3h_ago = now_utc - timedelta(hours=3)
+    # Format with space ('YYYY-MM-DD HH:MM:SS')
+    space_formatted_str = log_time_3h_ago.strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_session() as session:
+        svc = Service(name="api-lexico", image="img:latest", restart_policy="always")
+        session.add(svc)
+        session.commit()
+        session.refresh(svc)
+
+        # Directly insert raw row with space-formatted timestamp to simulate string storage
+        session.exec(
+            text(
+                "INSERT INTO logevent (service_id, service_name, created_at, message) "
+                "VALUES (:service_id, :service_name, :created_at, :message)"
+            ),
+            params={
+                "service_id": svc.id,
+                "service_name": "api-lexico",
+                "created_at": space_formatted_str,
+                "message": "space-formatted same-day log",
+            },
+        )
+        session.commit()
+
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.get("/logs/explore/api-lexico?days=1")
+
+    response = asyncio.run(_run())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["message"] == "space-formatted same-day log"
+
+
