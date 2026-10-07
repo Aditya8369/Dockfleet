@@ -90,8 +90,11 @@ def update_service_health(
         last_health_check updated
         consecutive_failures reset to 0
     - If unhealthy:
+        If svc.status is STOPPED, failed health check responses are ignored
+        and do not mutate health state into CRASHED or increment consecutive_failures.
+        Otherwise:
         status        stays as-is (running/stopped decided elsewhere)
-        health_status = HealthStatus.CRASHED
+        health_status = HealthStatus.CRASHED (if >= 3 failures) or UNHEALTHY
         last_health_check updated
         consecutive_failures++
     """
@@ -102,11 +105,20 @@ def update_service_health(
             print(f"[health] Service '{name}' not found in DB")
             return
 
+        if not is_healthy and svc.status in (
+            ContainerStatus.STOPPED,
+            ContainerStatus.STOPPED.value,
+        ):
+            return
+
         now = datetime.now(timezone.utc)
         svc.last_health_check = now
 
         if is_healthy:
-            if svc.status != ContainerStatus.STOPPED and svc.status != ContainerStatus.STOPPED.value:
+            if (
+                svc.status != ContainerStatus.STOPPED
+                and svc.status != ContainerStatus.STOPPED.value
+            ):
                 svc.status = ContainerStatus.RUNNING
             svc.health_status = HealthStatus.HEALTHY
             svc.consecutive_failures = 0
