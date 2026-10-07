@@ -35,22 +35,27 @@ async def stream_container_logs(service_name: str):
             stderr_buffer = []
 
             def enqueue_item(item):
-                """Enqueue log line into asyncio queue thread-safely."""
-                if stop_readers.is_set():
+                """Enqueue log line into asyncio queue thread-safely, dropping oldest entries when full."""
+                if stop_readers.is_set() or loop.is_closed():
                     return
-                fut = None
+
+                def _push():
+                    if stop_readers.is_set():
+                        return
+                    if queue.full():
+                        try:
+                            queue.get_nowait()
+                        except (asyncio.QueueEmpty, Exception):
+                            pass
+                    try:
+                        queue.put_nowait(item)
+                    except (asyncio.QueueFull, Exception):
+                        pass
+
                 try:
-                    fut = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
-                    fut.result(timeout=1.0)
-                except concurrent.futures.TimeoutError:
-                    if fut:
-                        fut.cancel()
-                    logger.debug("Timed out enqueueing item for %s", container)
-                    stop_readers.set()
-                except Exception as e:
-                    if fut:
-                        fut.cancel()
-                    logger.debug("Failed to enqueue item for %s: %s", container, e)
+                    loop.call_soon_threadsafe(_push)
+                except RuntimeError:
+                    # Event loop is closed
                     stop_readers.set()
 
             def read_stdout():
