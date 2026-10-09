@@ -382,4 +382,53 @@ def test_normalize_utc_datetime():
     assert _normalize_utc_datetime("not-a-date") is None
 
 
+def test_ingest_docker_logs_unicode(monkeypatch):
+    """Verify log ingestor handles non-ASCII / Unicode characters correctly."""
+    from unittest.mock import MagicMock, patch
+    from dockfleet.health.log_ingestor import ingest_docker_logs_once
+
+    with get_session() as session:
+        session.exec(select(LogEvent)).all()
+        session.exec(select(Service)).all()
+        session.query(LogEvent).delete()
+        session.query(Service).delete()
+
+        svc = Service(
+            name="unicode-svc",
+            image="dummy-image",
+            restart_policy="always",
+        )
+        session.add(svc)
+        session.commit()
+
+    unicode_lines = [
+        "2026-10-02T22:21:32.123456789Z \u2705 Service started successfully: \U0001F680\n",
+        "2026-10-02T22:21:33.123456789Z \u65e5\u672c\u8a9e\u30ed\u30b0 \u4e2d\u6587\u65e5\u5fd7 \U0001F525\n",
+        "2026-10-02T22:21:34.123456789Z \u00e9\u00e0\u00fc\u00f6\u00df caf\u00e9 \u2014 \u00a9 \u00ae\n",
+    ]
+
+    def mock_subprocess_popen(cmd, *args, **kwargs):
+        mock_process = MagicMock()
+        mock_process.wait.return_value = 0
+        mock_stdout = MagicMock()
+        mock_stdout.__iter__.return_value = unicode_lines
+        mock_process.stdout = mock_stdout
+        return mock_process
+
+    with patch("subprocess.Popen", side_effect=mock_subprocess_popen):
+        ingest_docker_logs_once(tail=200)
+
+    with get_session() as session:
+        rows = session.exec(
+            select(LogEvent)
+            .where(LogEvent.service_name == "unicode-svc")
+            .order_by(LogEvent.id)
+        ).all()
+        assert len(rows) == 3
+        assert "\u2705 Service started successfully: \U0001F680" in rows[0].message
+        assert "\u65e5\u672c\u8a9e\u30ed\u30b0 \u4e2d\u6587\u65e5\u5fd7 \U0001F525" in rows[1].message
+        assert "\u00e9\u00e0\u00fc\u00f6\u00df caf\u00e9 \u2014 \u00a9 \u00ae" in rows[2].message
+
+
+
 
