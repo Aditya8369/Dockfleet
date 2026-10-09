@@ -45,6 +45,41 @@ services:
     assert "Port values must be between 1 and 65535" in result.output
 
 
+def test_cli_validate_non_positive_healthcheck_interval(tmp_path):
+    bad_config = tmp_path / "bad_interval.yaml"
+    bad_config.write_text("""
+services:
+  web:
+    image: nginx
+    restart: always
+    healthcheck:
+      type: http
+      endpoint: "http://localhost:80/health"
+      interval: 0
+""")
+    result = runner.invoke(app, ["validate", str(bad_config)])
+    assert result.exit_code == 1
+    assert "Configuration Validation Error" in result.output
+    assert "interval must be greater than 0" in result.output
+
+    bad_config_neg = tmp_path / "bad_interval_neg.yaml"
+    bad_config_neg.write_text("""
+services:
+  web:
+    image: nginx
+    restart: always
+    healthcheck:
+      type: http
+      endpoint: "http://localhost:80/health"
+      interval: -5
+""")
+    result_neg = runner.invoke(app, ["validate", str(bad_config_neg)])
+    assert result_neg.exit_code == 1
+    assert "Configuration Validation Error" in result_neg.output
+    assert "interval must be greater than 0" in result_neg.output
+
+
+
 
 @patch("dockfleet.cli.main.spawn_background_scheduler")
 @patch("dockfleet.cli.main.bootstrap_from_path")
