@@ -630,7 +630,7 @@ class Orchestrator:
                 if not name.startswith("dockfleet_"):
                     continue
 
-                service_name = name.replace("dockfleet_", "")
+                service_name = name.removeprefix("dockfleet_")
 
                 if "Exited" in status:
                     logger.warning("%s detected as crashed (%s)", service_name, status)
@@ -772,7 +772,7 @@ class Orchestrator:
             name = container.get("Names") or container.get("Name") or ""
             if not name.startswith("dockfleet_"):
                 continue
-            service_name = name.replace("dockfleet_", "")
+            service_name = name.removeprefix("dockfleet_")
 
             status_raw = container.get("Status", "")
             state_raw = container.get("State", "")
