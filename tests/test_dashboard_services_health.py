@@ -542,5 +542,66 @@ def test_get_services_docker_ps_restarting_status(monkeypatch):
         assert status["stopped"] == 0
 
 
+def test_get_services_matching_dockfleet_prefix_in_service_name(monkeypatch):
+    """
+    Verify that a service named 'dockfleet_worker' matches container 'dockfleet_dockfleet_worker'
+    and properly displays its runtime stats (status, cpu, memory, uptime).
+    """
+    test_engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc = DBService(
+            name="dockfleet_worker",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.HEALTHY,
+            image="worker:alpine",
+            restart_policy="always",
+            restart_count=0,
+        )
+        session.add(svc)
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.dashboard.services.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    docker_ps_output = json.dumps(
+        {
+            "Names": "dockfleet_dockfleet_worker",
+            "Status": "Up 12 minutes",
+            "RunningFor": "12 minutes",
+        }
+    )
+
+    docker_stats_output = json.dumps(
+        {
+            "Name": "dockfleet_dockfleet_worker",
+            "CPUPerc": "3.5%",
+            "MemUsage": "120MB",
+        }
+    )
+
+    def mock_subprocess_run(cmd, *args, **kwargs):
+        mock_res = MagicMock()
+        if "ps" in cmd:
+            mock_res.stdout = docker_ps_output
+        elif "stats" in cmd:
+            mock_res.stdout = docker_stats_output
+        return mock_res
+
+    with patch("subprocess.run", side_effect=mock_subprocess_run):
+        services = get_services()
+
+    assert len(services) == 1
+    assert services[0]["name"] == "dockfleet_worker"
+    assert services[0]["status"] == ContainerStatus.RUNNING.value
+    assert services[0]["uptime"] == "12 minutes"
+    assert services[0]["cpu"] == "3.5%"
+    assert services[0]["memory"] == "120MB"
+
+
+
 
 

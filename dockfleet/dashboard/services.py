@@ -63,7 +63,7 @@ def get_services() -> list[dict]:
             if not isinstance(name, str) or not name.startswith("dockfleet_"):
                 continue
 
-            service_name = name.replace("dockfleet_", "")
+            service_name = name.removeprefix("dockfleet_")
 
             if service_name not in services:
                 continue
@@ -129,7 +129,7 @@ def get_services() -> list[dict]:
             if not isinstance(name, str) or not name.startswith("dockfleet_"):
                 continue
 
-            service_name = name.replace("dockfleet_", "")
+            service_name = name.removeprefix("dockfleet_")
 
             if service_name in services:
                 services[service_name]["cpu"] = container.get("CPUPerc")
