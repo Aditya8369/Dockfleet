@@ -322,35 +322,23 @@ def list_logs(
 @router.get("/logs/explore/{service_name}")
 async def explore_logs(service_name: str, days: int = 1):
     """Retrieve time-windowed log records for a service."""
-    cutoff_utc = datetime.now(timezone.utc) - timedelta(days=days)
-
-    def _to_utc(dt_val: datetime | str | None) -> datetime | None:
-        if dt_val is None:
-            return None
-        if isinstance(dt_val, str):
-            try:
-                dt_val = datetime.fromisoformat(dt_val.replace("Z", "+00:00"))
-            except Exception:
-                return None
-        if dt_val.tzinfo is None:
-            return dt_val.replace(tzinfo=timezone.utc)
-        return dt_val.astimezone(timezone.utc)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     with get_session() as session:
         statement = (
             select(LogEvent)
-            .where(LogEvent.service_name == service_name)
+            .where(
+                LogEvent.service_name == service_name,
+                LogEvent.created_at >= cutoff,
+            )
             .order_by(LogEvent.created_at.desc(), LogEvent.id.desc())
+            .limit(500)
         )
         logs = session.exec(statement).all()
-        results = []
-        for log in logs:
-            log_dt = _to_utc(log.created_at)
-            if log_dt is not None and log_dt >= cutoff_utc:
-                results.append({"timestamp": to_ist_iso(log.created_at), "message": log.message})
-            if len(results) >= 500:
-                break
-        return results
+        return [
+            {"timestamp": to_ist_iso(log.created_at), "message": log.message}
+            for log in logs
+        ]
 
 
 # ------------------------------------------------
