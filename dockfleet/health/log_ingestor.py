@@ -102,12 +102,16 @@ def ingest_docker_logs_once(tail: int = 200) -> None:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                 )
             except (subprocess.SubprocessError, OSError) as e:
                 print(f"Error streaming docker logs for {name}: {e}")
                 continue
 
-            with tempfile.TemporaryFile(mode="w+t") as spool:
+            with tempfile.TemporaryFile(
+                mode="w+t", encoding="utf-8", errors="replace"
+            ) as spool:
                 # Stage to disk (tempfile) to avoid memory blowup while we wait for success
                 for line in process.stdout:
                     line = line.rstrip()
