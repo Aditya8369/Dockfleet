@@ -412,11 +412,21 @@ def system_status():
     services = get_services()
 
     total = len(services)
-    running = sum(1 for s in services if s["status"] == ContainerStatus.RUNNING.value)
     restarting = sum(
         1 for s in services if s.get("health_status") == HealthStatus.RESTARTING.value
     )
-    stopped = sum(1 for s in services if s["status"] == ContainerStatus.STOPPED.value)
+    running = sum(
+        1
+        for s in services
+        if s["status"] == ContainerStatus.RUNNING.value
+        and s.get("health_status") != HealthStatus.RESTARTING.value
+    )
+    stopped = sum(
+        1
+        for s in services
+        if s["status"] == ContainerStatus.STOPPED.value
+        and s.get("health_status") != HealthStatus.RESTARTING.value
+    )
 
     unhealthy = sum(
         1

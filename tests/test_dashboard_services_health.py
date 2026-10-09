@@ -268,9 +268,10 @@ def test_system_status_counts_restarting_services(monkeypatch):
         res = system_status()
         assert res["total_services"] == 4
         assert res["restarting"] == 1
-        assert res["running"] == 3
+        assert res["running"] == 2
         assert res["unhealthy"] == 1
         assert res["stopped"] == 1
+        assert res["running"] + res["restarting"] + res["stopped"] == res["total_services"]
 
         # 2. HTTP GET /status endpoint call
         async def _test_http():
@@ -284,9 +285,10 @@ def test_system_status_counts_restarting_services(monkeypatch):
         data = response.json()
         assert data["total_services"] == 4
         assert data["restarting"] == 1
-        assert data["running"] == 3
+        assert data["running"] == 2
         assert data["unhealthy"] == 1
         assert data["stopped"] == 1
+        assert data["running"] + data["restarting"] + data["stopped"] == data["total_services"]
 
 
 def test_metrics_calculates_stopped_and_running_from_container_status(monkeypatch, tmp_path):
@@ -537,9 +539,10 @@ def test_get_services_docker_ps_restarting_status(monkeypatch):
         # Test /status route
         status = system_status()
         assert status["total_services"] == 1
-        assert status["running"] == 1
+        assert status["running"] == 0
         assert status["restarting"] == 1
         assert status["stopped"] == 0
+        assert status["running"] + status["restarting"] + status["stopped"] == status["total_services"]
 
 
 
