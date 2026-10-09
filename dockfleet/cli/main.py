@@ -227,7 +227,7 @@ def up(
 
         if detach:
             # Check if health scheduler is already running
-            lock = SchedulerLock(PROJECT_ROOT)
+            lock = SchedulerLock(path)
             pid_info = lock._read_pid_file()
             if pid_info and lock._pid_is_running(pid_info.get("pid", -1)):
                 typer.echo(
@@ -241,7 +241,7 @@ def up(
             typer.echo("Use `dockfleet health-logs` to inspect health engine output.")
         else:
             setup_health_logging()
-            scheduler = HealthScheduler(config, project_dir=PROJECT_ROOT)
+            scheduler = HealthScheduler(config, project_dir=path)
             typer.echo(
                 f"Running health scheduler in foreground (Ctrl+C to stop); logs -> {HEALTH_LOG_PATH}\n"
             )
@@ -298,7 +298,7 @@ def restart(path: Path = typer.Argument("examples/dockfleet.yaml")):
         typer.echo(f"Restarting services from {path}...\n")
 
         # Stop background scheduler if running
-        stop_background_scheduler(PROJECT_ROOT)
+        stop_background_scheduler(path)
 
         # Ensure DB has Service rows for this config
         typer.echo(f"Bootstrapping health DB from {path} ...")
@@ -558,8 +558,8 @@ def health_dev(
 
         # For --once mode, skip locking (single pass, no long-running scheduler).
         # For long-running mode, lock to prevent duplicate schedulers.
-        # Lock scope: PROJECT_ROOT (where dockfleet.db lives).
-        project_dir = PROJECT_ROOT if not once else None
+        # Lock scope: project directory where config / dockfleet.db lives.
+        project_dir = path if not once else None
         scheduler = HealthScheduler(config, project_dir=project_dir)
 
         if once:
@@ -612,7 +612,7 @@ def self_heal(
         typer.echo(f"Bootstrapping health DB from {path} ...")
         bootstrap_from_path(str(path))
 
-        project_dir = PROJECT_ROOT
+        project_dir = path
         scheduler = HealthScheduler(config, project_dir=project_dir)
 
         typer.echo("Self-healing active. Press Ctrl+C to stop.\n")

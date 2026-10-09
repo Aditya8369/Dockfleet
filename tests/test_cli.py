@@ -377,6 +377,41 @@ services:
     assert not lock_file.exists()
 
 
+@patch("dockfleet.cli.main.SchedulerLock._pid_is_running", return_value=True)
+@patch("dockfleet.cli.main.os.kill")
+@patch("dockfleet.core.orchestrator.Orchestrator.down")
+def test_cli_down_stops_scheduler_in_subdirectory(mock_down, mock_kill, mock_pid_running, tmp_path):
+    """Test that dockfleet down on a subdirectory config path stops the running background scheduler and cleans up lock/pid files."""
+    import json
+    import signal
+    from dockfleet.health.scheduler_lock import SchedulerLock
+
+    sub_dir = tmp_path / "nested" / "project"
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    config_file = sub_dir / "dockfleet.yaml"
+    config_file.write_text("""
+services:
+  web:
+    image: nginx
+    restart: always
+""")
+
+    pid_file = sub_dir / SchedulerLock.PID_FILENAME
+    lock_file = sub_dir / SchedulerLock.LOCK_FILENAME
+    pid_file.write_text(json.dumps({"pid": 4321}))
+    lock_file.write_text("lock")
+
+    result = runner.invoke(app, ["down", str(config_file)])
+    assert result.exit_code == 0
+    assert "Stopping services from" in result.stdout
+    assert "Services stopped" in result.stdout
+    mock_down.assert_called_once()
+    mock_kill.assert_called_once_with(4321, signal.SIGTERM)
+    assert not pid_file.exists()
+    assert not lock_file.exists()
+
+
+
 def test_cli_show_logs_displays_most_recent_ten_logs(tmp_path, monkeypatch):
     """Test that dockfleet show-logs displays the 10 most recent logs in descending order."""
     from datetime import datetime, timedelta, timezone
