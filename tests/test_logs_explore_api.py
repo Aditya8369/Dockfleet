@@ -284,3 +284,38 @@ def test_explore_logs_string_lexicographical_same_day_comparison():
     assert data[0]["message"] == "space-formatted same-day log"
 
 
+def test_explore_logs_limits_to_500_records():
+    """Verify explore_logs returns at most 500 records."""
+    now_utc = datetime.now(timezone.utc)
+
+    with get_session() as session:
+        svc = Service(name="api-limit", image="img:latest", restart_policy="always")
+        session.add(svc)
+        session.commit()
+        session.refresh(svc)
+
+        events = [
+            LogEvent(
+                service_id=svc.id,
+                service_name="api-limit",
+                created_at=now_utc - timedelta(seconds=i),
+                message=f"log message {i}",
+            )
+            for i in range(600)
+        ]
+        session.add_all(events)
+        session.commit()
+
+    async def _run():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.get("/logs/explore/api-limit?days=1")
+
+    response = asyncio.run(_run())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 500
+
+
+
