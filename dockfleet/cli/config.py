@@ -15,6 +15,14 @@ class HealthCheckConfig(BaseModel):
     endpoint: str | None = None
     interval: int | None = None
 
+    @field_validator("interval")
+    @classmethod
+    def validate_interval(cls, value):
+        """Validate healthcheck interval is a positive integer."""
+        if value is not None and value <= 0:
+            raise ValueError("interval must be greater than 0")
+        return value
+
 
 # Restart Policy Enum
 
@@ -115,6 +123,9 @@ class ServiceConfig(BaseModel):
 
         if value.interval is None:
             raise ValueError("healthcheck.interval is required")
+
+        if value.interval <= 0:
+            raise ValueError("healthcheck.interval must be greater than 0")
 
         if value.type.lower() in {"http", "tcp"} and not value.endpoint:
             raise ValueError(
