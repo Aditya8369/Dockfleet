@@ -170,7 +170,7 @@ def needs_restart(service: Service) -> bool:
 
 def record_restart_event(service: Service, reason: str) -> None:
     """
-    Store a simple restart event for later crash analytics and increment restart_count in DB.
+    Store a simple restart event for later crash analytics in DB.
     Example reason: "3_failed_health_checks".
     """
     with get_session() as session:
@@ -185,9 +185,6 @@ def record_restart_event(service: Service, reason: str) -> None:
             ).one_or_none()
 
         if svc is not None:
-            svc.restart_count = (svc.restart_count or 0) + 1
-            session.add(svc)
-            service.restart_count = svc.restart_count
             service_id = svc.id
             service_name = svc.name
             previous_status = (

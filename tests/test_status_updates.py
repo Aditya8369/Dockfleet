@@ -54,10 +54,9 @@ def test_mark_service_running_and_stopped(tmp_path):
         assert svc.status == ContainerStatus.STOPPED
 
 
-def test_record_restart_event_increments_restart_count(tmp_path):
+def test_record_restart_event_persists_event(tmp_path):
     """
-    Verify that record_restart_event increments service.restart_count in DB
-    and persists the RestartEvent record for crash analytics.
+    Verify that record_restart_event persists the RestartEvent record for crash analytics.
     """
     from dockfleet.health.models import RestartEvent
     from dockfleet.health.status import record_restart_event
@@ -75,7 +74,7 @@ def test_record_restart_event_increments_restart_count(tmp_path):
             image="nginx:alpine",
             restart_policy="always",
             status=ContainerStatus.RUNNING,
-            restart_count=0,
+            restart_count=1,
         )
         session.add(svc)
         session.commit()
@@ -96,7 +95,8 @@ def test_record_restart_event_increments_restart_count(tmp_path):
 
     with get_session() as session:
         updated2 = session.exec(select(Service).where(Service.name == "test-self-heal")).one()
-        assert updated2.restart_count == 2
+        assert updated2.restart_count == 1
         events = session.exec(select(RestartEvent).where(RestartEvent.service_name == "test-self-heal")).all()
         assert len(events) == 2
+
 
