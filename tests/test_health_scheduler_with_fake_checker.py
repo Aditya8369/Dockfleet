@@ -211,4 +211,48 @@ def test_scheduler_run_single_pass():
         assert svc.consecutive_failures == 0
 
 
+def test_scheduler_poll_loop_accounts_for_execution_time(monkeypatch):
+    """
+    Verify that HealthScheduler._poll calculates sleep_time based on start_time
+    and pass execution duration, ensuring checks occur at fixed intervals without drift.
+    """
+    config_path = "examples/dockfleet.yaml"
+    config: DockFleetConfig = load_config(config_path)
+
+    fake_checker = FakeChecker(script={"api": [True]})
+    scheduler = HealthScheduler(
+        config=config,
+        interval_seconds=10,
+        checker=fake_checker,
+    )
+
+    sleep_calls = []
+
+    def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+        scheduler._stopped = True
+
+    # Simulate pass execution taking 2.5 seconds
+    def mock_run_single_pass():
+        time_state["now"] += 2.5
+        return {"api": True}
+
+    time_state = {"now": 1000.0}
+
+    def mock_monotonic():
+        return time_state["now"]
+
+    monkeypatch.setattr("time.monotonic", mock_monotonic)
+    monkeypatch.setattr("time.sleep", mock_sleep)
+    monkeypatch.setattr(scheduler, "run_single_pass", mock_run_single_pass)
+
+    scheduler._stopped = False
+    scheduler._poll()
+
+    assert len(sleep_calls) == 1
+    # 10s interval - 2.5s pass execution = 7.5s sleep time
+    assert abs(sleep_calls[0] - 7.5) < 0.001
+
+
+
 
