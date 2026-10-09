@@ -56,7 +56,45 @@ def test_restart_service_happy_path():
         orch.restart_service("svc-orch", config)
 
     svc = _get_service("svc-orch")
-    assert svc.restart_count >= 1
+    assert svc.restart_count == 1
+
+
+def test_auto_restart_increments_restart_count_exactly_once():
+    """Test that auto-restart via handle_unhealthy_service increments restart_count exactly once."""
+    config = DockFleetConfig(
+        services={
+            "svc-auto": ServiceConfig(
+                image="nginx:alpine", restart=RestartPolicy.always, ports=["8080:80"]
+            )
+        }
+    )
+
+    orch = Orchestrator(config)
+
+    with get_session() as session:
+        svc = Service(
+            name="svc-auto",
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=0,
+            status=ContainerStatus.RUNNING,
+        )
+        session.add(svc)
+        session.commit()
+
+    update_service_health("svc-auto", False, "fail 1")
+    update_service_health("svc-auto", False, "fail 2")
+    update_service_health("svc-auto", False, "fail 3")
+
+    with patch("subprocess.run") as mock_run, patch.object(orch, "start_service"):
+        mock_run.return_value = MagicMock(returncode=0)
+        orch.handle_unhealthy_service("svc-auto", config, "3_failed_health_checks")
+
+    svc = _get_service("svc-auto")
+    assert svc.restart_count == 1
+    assert svc.consecutive_failures == 0
+    assert svc.health_status == HealthStatus.HEALTHY
+
 
 
 def test_restart_failure_marks_crashed():
