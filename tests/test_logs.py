@@ -557,4 +557,48 @@ async def test_stream_container_logs_burst_load_does_not_drop_streaming(mock_pop
     assert not any("error reading logs" in e.lower() for e in events)
 
 
+@pytest.mark.asyncio
+@patch("dockfleet.core.logs.store_log_line_in_db")
+@patch("dockfleet.core.logs.subprocess.Popen")
+async def test_stream_logs_endpoint_client_disconnect_terminates_subprocess(mock_popen, mock_store):
+    """When a client disconnects from the SSE stream, docker logs process is terminated."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    mock_proc = MagicMock()
+    mock_stdout = MagicMock()
+    mock_stderr = MagicMock()
+    mock_proc.stdout = mock_stdout
+    mock_proc.stderr = mock_stderr
+    mock_proc.poll = MagicMock(return_value=None)
+    mock_proc.terminate = MagicMock()
+    mock_proc.kill = MagicMock()
+    mock_proc.wait = MagicMock(return_value=0)
+
+    mock_stdout.readline = MagicMock(return_value="log line 1\n")
+    mock_stdout.closed = False
+    mock_stderr.readline = MagicMock(return_value="")
+    mock_stderr.closed = False
+    mock_popen.return_value = mock_proc
+
+    mock_request = MagicMock()
+    # Initially connected, then disconnected
+    mock_request.is_disconnected = AsyncMock(side_effect=[False, True, True])
+
+    from dockfleet.dashboard.routes import stream_logs
+
+    response = await stream_logs("api", request=mock_request)
+    # Consume lines from response
+    lines = []
+    async for line in response.body_iterator:
+        lines.append(line)
+        break
+
+    # Give cleanup tasks a moment to execute
+    await asyncio.sleep(0.05)
+
+    assert mock_proc.terminate.called or mock_proc.kill.called
+
+
+
 

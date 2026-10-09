@@ -10,7 +10,7 @@ from dockfleet.health.logs import store_log_line as store_log_line_in_db
 logger = logging.getLogger(__name__)
 
 
-async def stream_container_logs(service_name: str):
+async def stream_container_logs(service_name: str, request: any = None):
     """100% reliable: async log streaming with concurrent stdout/stderr draining."""
     container = f"dockfleet_{service_name}"
     loop = asyncio.get_running_loop()
@@ -109,7 +109,28 @@ async def stream_container_logs(service_name: str):
 
             active_streams = 2
             while active_streams > 0:
-                stream_type, payload = await queue.get()
+                if request is not None and hasattr(request, "is_disconnected"):
+                    try:
+                        if await request.is_disconnected():
+                            return
+                    except Exception:
+                        pass
+
+                try:
+                    if request is not None:
+                        stream_type, payload = await asyncio.wait_for(
+                            queue.get(), timeout=0.5
+                        )
+                    else:
+                        stream_type, payload = await queue.get()
+                except asyncio.TimeoutError:
+                    if request is not None and hasattr(request, "is_disconnected"):
+                        try:
+                            if await request.is_disconnected():
+                                return
+                        except Exception:
+                            pass
+                    continue
                 if stream_type in ("stdout_error", "stderr_error"):
                     logger.error(
                         "%s encountered error for container %s: %s",
