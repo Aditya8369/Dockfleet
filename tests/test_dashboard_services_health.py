@@ -542,5 +542,70 @@ def test_get_services_docker_ps_restarting_status(monkeypatch):
         assert status["stopped"] == 0
 
 
+def test_dashboard_restart_endpoint_resets_consecutive_failures(monkeypatch, tmp_path):
+    """
+    Verify that calling POST /services/{name}/restart resets consecutive_failures to 0.
+    """
+    from dockfleet.health.status import update_service_health
+
+    db_path = tmp_path / "test_manual_restart.db"
+    test_engine = create_engine(f"sqlite:///{db_path}")
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        svc = DBService(
+            name="api",
+            status=ContainerStatus.RUNNING,
+            health_status=HealthStatus.CRASHED,
+            image="nginx:alpine",
+            restart_policy="always",
+            restart_count=1,
+            consecutive_failures=3,
+        )
+        session.add(svc)
+        session.commit()
+
+    monkeypatch.setattr(
+        "dockfleet.dashboard.services.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+    monkeypatch.setattr(
+        "dockfleet.dashboard.routes.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+    monkeypatch.setattr(
+        "dockfleet.health.status.get_session",
+        lambda: get_session(engine=test_engine),
+    )
+
+    mock_orch = MagicMock()
+    mock_orch.restart_service.return_value = True
+    monkeypatch.setattr("dockfleet.dashboard.routes.get_orchestrator", lambda: mock_orch)
+
+    async def _test_http():
+        async with httpx.AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            return await client.post("/services/api/restart")
+
+    response = asyncio.run(_test_http())
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+    with Session(test_engine) as session:
+        svc_after = session.exec(select(DBService).where(DBService.name == "api")).one()
+        assert svc_after.consecutive_failures == 0
+        assert svc_after.health_status == HealthStatus.HEALTHY
+        assert svc_after.status == ContainerStatus.RUNNING
+
+    # 1 subsequent failure
+    update_service_health("api", is_healthy=False, reason="error 1")
+    with Session(test_engine) as session:
+        svc_next = session.exec(select(DBService).where(DBService.name == "api")).one()
+        assert svc_next.consecutive_failures == 1
+        assert svc_next.health_status == HealthStatus.UNHEALTHY
+
+
+
 
 

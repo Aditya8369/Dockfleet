@@ -245,6 +245,7 @@ def record_manual_restart_event(service_name: str) -> None:
     and the orchestrator has successfully restarted the container.
 
     - Marks status as ContainerStatus.RUNNING and health_status as HealthStatus.HEALTHY.
+    - Resets consecutive_failures to 0.
     - Inserts a RestartEvent with reason='manual_dashboard_restart'.
     """
     with get_session() as session:
@@ -261,6 +262,7 @@ def record_manual_restart_event(service_name: str) -> None:
         )
         svc.status = ContainerStatus.RUNNING
         svc.health_status = HealthStatus.HEALTHY
+        svc.consecutive_failures = 0
 
         event = RestartEvent(
             service_id=svc.id,

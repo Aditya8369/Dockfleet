@@ -77,3 +77,57 @@ def test_consecutive_failures_and_status_transitions(tmp_path):
     assert svc.consecutive_failures == 3
     assert svc.restart_count == baseline_restart_count
     assert svc.last_failure_reason == "fail 3"
+
+
+def test_manual_restart_resets_consecutive_failures(tmp_path):
+    """
+    Verify that manual restart via record_manual_restart_event resets consecutive_failures to 0.
+    1 subsequent health check failure should result in consecutive_failures=1 and health_status='unhealthy'
+    (rather than consecutive_failures=4 and health_status='crashed').
+    """
+    from dockfleet.health.status import record_manual_restart_event
+
+    init_db()
+
+    config_path = "examples/dockfleet.yaml"
+    config: DockFleetConfig = load_config(config_path)
+
+    with get_session() as session:
+        seed_services(config, session)
+        for s in session.exec(select(Service)).all():
+            s.status = "running"
+            session.add(s)
+        session.commit()
+
+    service_name = list(config.services.keys())[0]
+
+    def get_service():
+        with get_session() as session_local:
+            return session_local.exec(
+                select(Service).where(Service.name == service_name)
+            ).one()
+
+    # Drive service into crashed state with 3 consecutive failures
+    update_service_health(service_name, is_healthy=False, reason="fail 1")
+    update_service_health(service_name, is_healthy=False, reason="fail 2")
+    update_service_health(service_name, is_healthy=False, reason="fail 3")
+
+    svc = get_service()
+    assert svc.consecutive_failures == 3
+    assert svc.health_status == "crashed"
+
+    # Trigger manual restart
+    record_manual_restart_event(service_name)
+
+    svc_after_restart = get_service()
+    assert svc_after_restart.consecutive_failures == 0
+    assert svc_after_restart.status == "running"
+    assert svc_after_restart.health_status == "healthy"
+
+    # 1 subsequent failure
+    update_service_health(service_name, is_healthy=False, reason="fail after manual restart")
+
+    svc_after_failure = get_service()
+    assert svc_after_failure.consecutive_failures == 1
+    assert svc_after_failure.health_status == "unhealthy"
+
