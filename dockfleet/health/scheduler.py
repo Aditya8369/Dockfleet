@@ -214,9 +214,13 @@ class HealthScheduler:
         self._logger.info("HealthScheduler: poll loop started")
 
         while not self._stopped:
+            start_time = time.monotonic()
             self._logger.info("HealthScheduler: polling services...")
             self.run_single_pass()
-            time.sleep(self.interval_seconds)
+            elapsed = time.monotonic() - start_time
+            sleep_time = max(0.0, self.interval_seconds - elapsed)
+            if not self._stopped and sleep_time > 0:
+                time.sleep(sleep_time)
 
         self._logger.info("HealthScheduler: poll loop exiting")
 
