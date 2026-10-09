@@ -442,8 +442,9 @@ async def stream_logs(service: str, request: Request = None):
     """Server-Sent Events (SSE) endpoint to stream real-time container log lines."""
 
     async def event_stream():
+        gen = stream_container_logs(service, request=request)
         try:
-            async for line in stream_container_logs(service):
+            async for line in gen:
                 if request is not None and await request.is_disconnected():
                     break
                 yield line
@@ -457,6 +458,8 @@ async def stream_logs(service: str, request: Request = None):
             tb = traceback.format_exc()
             for line in tb.splitlines():
                 yield f"data: {line}\n\n"
+        finally:
+            await gen.aclose()
 
     return StreamingResponse(
         event_stream(),
